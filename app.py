@@ -1,9 +1,10 @@
 import sys
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QListWidget, QListWidgetItem, QFrame, QSpacerItem, QSizePolicy
+    QPushButton, QComboBox, QListWidget, QListWidgetItem, QFrame
 )
 from PyQt6.QtCore import Qt
+
 
 class TimetableForm(QWidget):
     def __init__(self):
@@ -14,7 +15,7 @@ class TimetableForm(QWidget):
         self.setStyleSheet("background-color: #FFFFFF;")
 
         # Main Layout
-        main_layout = QHBoxLayout(self)
+        self.main_layout = QHBoxLayout(self)
 
         # Sidebar
         self.sidebar = QListWidget()
@@ -59,19 +60,49 @@ class TimetableForm(QWidget):
         self.update_sidebar_styles()
 
         # Connect signal to update styles on selection change
-        self.sidebar.currentRowChanged.connect(self.update_sidebar_styles)
+        self.sidebar.currentRowChanged.connect(self.load_form)
 
         # Form Container
-        form_container = QFrame()
-        form_container.setStyleSheet("background-color: #D3CFCF; border-radius: 10px;")
-        form_layout = QVBoxLayout(form_container)
+        self.form_container = QFrame()
+        self.form_container.setStyleSheet("background-color: #D3CFCF; border-radius: 10px;")
+        self.form_layout = QVBoxLayout(self.form_container)
 
-        # Title
+        # Load the initial form
+        self.load_form(0)
+
+        # Add Sidebar and Form Container to Main Layout
+        self.main_layout.addWidget(self.sidebar)
+        self.main_layout.addWidget(self.form_container)
+
+    def update_sidebar_styles(self):
+        for i in range(self.sidebar.count()):
+            item = self.sidebar.item(i)
+            if i == self.sidebar.currentRow():
+                item.setBackground(Qt.GlobalColor.lightGray)
+                item.setForeground(Qt.GlobalColor.black)
+            else:
+                item.setBackground(Qt.GlobalColor.darkGray)
+                item.setForeground(Qt.GlobalColor.white)
+
+    def load_form(self, index):
+        section_name = self.sidebar.item(index).text()
+
+        # Clear the current layout
+        while self.form_layout.count():
+            child = self.form_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        if section_name == "General Info.":
+            self.load_general_info_form()
+        elif section_name == "Classroom Details":
+            self.load_classroom_details_form()
+
+    def load_general_info_form(self):
         title_label = QLabel("General Info.")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #000000;")
-        form_layout.addWidget(title_label)
+        self.form_layout.addWidget(title_label)
 
-        # Input Fields
         fields = [
             ("Academic Year", "e.g., 2023-2024"),
             ("Semester", "1st Semester"),
@@ -82,7 +113,7 @@ class TimetableForm(QWidget):
         for label_text, placeholder in fields:
             label = QLabel(label_text)
             label.setStyleSheet("font-size: 12px; font-weight: bold; color: #333333; margin-top: 10px;")
-            form_layout.addWidget(label)
+            self.form_layout.addWidget(label)
 
             if label_text == "Semester":
                 combo_box = QComboBox()
@@ -95,7 +126,7 @@ class TimetableForm(QWidget):
                         border-radius: 5px;
                     }
                 """)
-                form_layout.addWidget(combo_box)
+                self.form_layout.addWidget(combo_box)
             else:
                 line_edit = QLineEdit()
                 line_edit.setPlaceholderText(placeholder)
@@ -107,14 +138,9 @@ class TimetableForm(QWidget):
                         border-radius: 5px;
                     }
                 """)
-                form_layout.addWidget(line_edit)
+                self.form_layout.addWidget(line_edit)
 
-        # Spacer to Push Save Button to Bottom
-        spacer = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-        form_layout.addItem(spacer)
-
-        # Save Button
-        save_button = QPushButton("Save And Next")
+        save_button = QPushButton("Save and Next")
         save_button.setStyleSheet("""
             QPushButton {
                 background-color: #3A3A3A;
@@ -127,22 +153,57 @@ class TimetableForm(QWidget):
                 background-color: #555555;
             }
         """)
-        form_layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignRight)
+        save_button.clicked.connect(lambda: self.sidebar.setCurrentRow(1))
+        self.form_layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignRight)
 
-        # Add Sidebar and Form Container to Main Layout
-        main_layout.addWidget(self.sidebar)
-        main_layout.addWidget(form_container)
+    def load_classroom_details_form(self):
+        title_label = QLabel("Classroom Details")
+        title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #000000;")
+        self.form_layout.addWidget(title_label)
 
-    def update_sidebar_styles(self):
-        """Update sidebar styles to set only the selected item with the specific color."""
-        for i in range(self.sidebar.count()):
-            item = self.sidebar.item(i)
-            if i == self.sidebar.currentRow():
-                item.setBackground(Qt.GlobalColor.lightGray)
-                item.setForeground(Qt.GlobalColor.black)
-            else:
-                item.setBackground(Qt.GlobalColor.darkGray)
-                item.setForeground(Qt.GlobalColor.white)
+        fields = [
+            ("Number of Classrooms", "e.g., 5"),
+            ("Classroom Numbers", "e.g., Room 101, Room 102"),
+            ("Lab Details", "e.g., Room 101, Room 102"),
+            ("Classroom Capacity", "e.g., 30")
+        ]
+
+        for label_text, placeholder in fields:
+            label = QLabel(label_text)
+            label.setStyleSheet("font-size: 12px; font-weight: bold; color: #333333; margin-top: 10px;")
+            self.form_layout.addWidget(label)
+
+            line_edit = QLineEdit()
+            line_edit.setPlaceholderText(placeholder)
+            line_edit.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #A0A0A0;
+                    padding: 5px;
+                    background-color: #FFFFFF;
+                    border-radius: 5px;
+                }
+            """)
+            self.form_layout.addWidget(line_edit)
+
+        back_button = QPushButton("Back")
+        back_button.clicked.connect(lambda: self.sidebar.setCurrentRow(0))
+        self.form_layout.addWidget(back_button, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        save_button = QPushButton("Save and Next")
+        save_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3A3A3A;
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #555555;
+            }
+        """)
+        self.form_layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignRight)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
