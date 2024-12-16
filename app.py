@@ -1,9 +1,11 @@
 import sys
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QListWidget, QListWidgetItem, QFrame
+    QPushButton, QComboBox, QListWidget, QListWidgetItem, QFrame,QMessageBox
 )
 from PyQt6.QtCore import Qt
+
+from db_helper import DatabaseHelper
 
 
 class TimetableForm(QWidget):
@@ -16,6 +18,7 @@ class TimetableForm(QWidget):
 
         # Main Layout
         self.main_layout = QHBoxLayout(self)
+        self.db = DatabaseHelper() 
 
         # Sidebar
         self.sidebar = QListWidget()
@@ -103,18 +106,23 @@ class TimetableForm(QWidget):
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #000000;")
         self.form_layout.addWidget(title_label)
 
+        # Dictionary to store references to input fields
+        self.form_inputs = {}
+
         fields = [
             ("Academic Year", "e.g., 2023-2024"),
             ("Semester", "1st Semester"),
             ("Class Name/Section", "e.g., B.Tech CSE - A"),
-            ("Start and End Time", "e.g., 9:00 AM - 5:00 PM")
+            ("Start and End Time", "e.g., 9:00 AM - 5:00 PM"),
         ]
 
         for label_text, placeholder in fields:
+            # Add label for each field
             label = QLabel(label_text)
             label.setStyleSheet("font-size: 12px; font-weight: bold; color: #333333; margin-top: 10px;")
             self.form_layout.addWidget(label)
 
+            # Add input field based on field type
             if label_text == "Semester":
                 combo_box = QComboBox()
                 combo_box.addItems(["1st Semester", "2nd Semester", "3rd Semester", "4th Semester"])
@@ -127,6 +135,7 @@ class TimetableForm(QWidget):
                     }
                 """)
                 self.form_layout.addWidget(combo_box)
+                self.form_inputs[label_text] = combo_box  # Store reference
             else:
                 line_edit = QLineEdit()
                 line_edit.setPlaceholderText(placeholder)
@@ -139,7 +148,9 @@ class TimetableForm(QWidget):
                     }
                 """)
                 self.form_layout.addWidget(line_edit)
+                self.form_inputs[label_text] = line_edit  # Store reference
 
+        # Add save button
         save_button = QPushButton("Save and Next")
         save_button.setStyleSheet("""
             QPushButton {
@@ -153,8 +164,35 @@ class TimetableForm(QWidget):
                 background-color: #555555;
             }
         """)
-        save_button.clicked.connect(lambda: self.sidebar.setCurrentRow(1))
+        save_button.clicked.connect(self.save_general_info)
         self.form_layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignRight)
+
+
+    def save_general_info(self):
+        # Retrieve values from input fields
+        academic_year = self.form_inputs["Academic Year"].text()
+        semester = self.form_inputs["Semester"].currentText()
+        class_name = self.form_inputs["Class Name/Section"].text()
+        start_end_time = self.form_inputs["Start and End Time"].text()
+
+        # Validate input
+        if not academic_year or not semester or not class_name or not start_end_time:
+            QMessageBox.warning(self, "Input Error", "Please fill in all fields.")
+            return
+
+        # Process start and end time
+        start_time, end_time = start_end_time.split("-") if "-" in start_end_time else (None, None)
+        if not start_time or not end_time:
+            QMessageBox.warning(self, "Input Error", "Please enter valid start and end times (e.g., 9:00 AM - 5:00 PM).")
+            return 
+
+        # Save data
+        self.db.insert_general_info(academic_year, semester, class_name, start_end_time)
+
+        QMessageBox.information(self, "Success", "General info saved successfully!")
+        self.sidebar.setCurrentRow(1)  # Move to the next form
+
+
 
     def load_classroom_details_form(self):
         title_label = QLabel("Classroom Details")
@@ -202,7 +240,25 @@ class TimetableForm(QWidget):
                 background-color: #555555;
             }
         """)
+        save_button.clicked.connect(self.save_classroom_details)
         self.form_layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignRight)
+
+    def save_classroom_details(self):
+        # Extract values
+        num_classrooms = int(self.form_layout.itemAt(1).widget().text())
+        classroom_numbers = self.form_layout.itemAt(3).widget().text()
+        lab_details = self.form_layout.itemAt(5).widget().text()
+        classroom_capacity = int(self.form_layout.itemAt(7).widget().text())
+
+        # Insert into the database
+        self.db.insert_classroom_details(num_classrooms, classroom_numbers, lab_details, classroom_capacity)
+
+        # Move to the next form
+        self.sidebar.setCurrentRow(2)
+
+    def closeEvent(self, event):
+        self.db.close()
+        event.accept()
 
 
 if __name__ == "__main__":
