@@ -284,10 +284,9 @@ class TimetableForm(QWidget):
 
         # Fields with updated second field
         fields = [
-            ("Faculty Name", "e.g., Dr. John Doe"),
-            ("Department", "e.g., Computer Science"),  # Updated second part
-            ("Contact Information", "e.g., john.doe@example.com"),
-            ("Availability", "e.g., Monday to Friday")
+            ("Faculty Name", "e.g., Dr. Rahul Sharma"),
+            ("Department", "e.g., AI Ethics"),  # Updated second part
+            ("Availability", "e.g., Monday to Thursday")
         ]
 
         for label_text, placeholder in fields:
@@ -377,7 +376,7 @@ class TimetableForm(QWidget):
             ("Subject Code", "e.g., MATH101"),
             ("Faculty Assigned", "e.g., Dr. John Doe"),
             ("Credits", "e.g., 3"),
-            ("Schedule", "e.g., Monday 10:00 AM - 11:00 AM")
+    
         ]
 
         for label_text, placeholder in fields:
@@ -464,10 +463,8 @@ class TimetableForm(QWidget):
         # Fields for student batches
         fields = [
             ("Batch Name", "e.g., Batch A"),
-            ("Batch Code", "e.g., A001"),
-            ("Start Date", "e.g., 01/01/2024"),
-            ("End Date", "e.g., 31/12/2024"),
-            ("Batch Size", "e.g., 30")
+            ("Batch Strength", "e.g., 90"),
+            ("Special Batch Preferences", "e.g., Batch A prefers morning labs")
         ]
 
         for label_text, placeholder in fields:
@@ -555,9 +552,9 @@ class TimetableForm(QWidget):
         # Fields for breaks
         fields = [
             ("Break Name", "e.g., Morning Break"),
-            ("Start Time", "e.g., 10:00 AM"),
-            ("End Time", "e.g., 10:30 AM"),
-            ("Duration", "e.g., 30 minutes")
+            ("Start Time", "e.g., 12:30 AM"),
+            ("End Time", "e.g., 1:30 AM"),
+            ("Duration", "e.g., 60 minutes")
         ]
 
         for label_text, placeholder in fields:
