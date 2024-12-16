@@ -15,4 +15,8 @@ rows = cursor.fetchall()
 for row in rows:
     print(row)
 
+cursor.execute("SELECT * FROM ClassroomDetails;")
+rows = cursor.fetchall()
+for row in rows:
+    print(row)
 conn.close()

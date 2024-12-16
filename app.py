@@ -195,17 +195,21 @@ class TimetableForm(QWidget):
 
 
     def load_classroom_details_form(self):
+        # Title Label
         title_label = QLabel("Classroom Details")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #000000;")
         self.form_layout.addWidget(title_label)
 
+        # Field definitions
+        self.classroom_fields = {}
         fields = [
             ("Number of Classrooms", "e.g., 5"),
             ("Classroom Numbers", "e.g., Room 101, Room 102"),
             ("Lab Details", "e.g., Room 101, Room 102"),
-            ("Classroom Capacity", "e.g., 30")
+            ("Classroom Capacity", "e.g., 30"),
         ]
 
+        # Add fields to the form
         for label_text, placeholder in fields:
             label = QLabel(label_text)
             label.setStyleSheet("font-size: 12px; font-weight: bold; color: #333333; margin-top: 10px;")
@@ -221,12 +225,27 @@ class TimetableForm(QWidget):
                     border-radius: 5px;
                 }
             """)
+            self.classroom_fields[label_text] = line_edit
             self.form_layout.addWidget(line_edit)
 
+        # Back Button
         back_button = QPushButton("Back")
+        back_button.setStyleSheet("""
+            QPushButton {
+                background-color: #F0F0F0;
+                color: #333333;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #E0E0E0;
+            }
+        """)
         back_button.clicked.connect(lambda: self.sidebar.setCurrentRow(0))
         self.form_layout.addWidget(back_button, alignment=Qt.AlignmentFlag.AlignLeft)
 
+        # Save and Next Button
         save_button = QPushButton("Save and Next")
         save_button.setStyleSheet("""
             QPushButton {
@@ -244,17 +263,37 @@ class TimetableForm(QWidget):
         self.form_layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignRight)
 
     def save_classroom_details(self):
-        # Extract values
-        num_classrooms = int(self.form_layout.itemAt(1).widget().text())
-        classroom_numbers = self.form_layout.itemAt(3).widget().text()
-        lab_details = self.form_layout.itemAt(5).widget().text()
-        classroom_capacity = int(self.form_layout.itemAt(7).widget().text())
+        try:
+            # Extract and validate input values
+            num_classrooms = self.classroom_fields["Number of Classrooms"].text().strip()
+            classroom_numbers = self.classroom_fields["Classroom Numbers"].text().strip()
+            lab_details = self.classroom_fields["Lab Details"].text().strip()
+            classroom_capacity = self.classroom_fields["Classroom Capacity"].text().strip()
 
-        # Insert into the database
-        self.db.insert_classroom_details(num_classrooms, classroom_numbers, lab_details, classroom_capacity)
+            # Check for empty fields
+            if not all([num_classrooms, classroom_numbers, lab_details, classroom_capacity]):
+                QMessageBox.warning(self, "Error", "Please fill in all the fields.")
+                return
 
-        # Move to the next form
-        self.sidebar.setCurrentRow(2)
+            # Convert numeric fields to integers and handle invalid input
+            try:
+                num_classrooms = int(num_classrooms)
+                classroom_capacity = int(classroom_capacity)
+            except ValueError:
+                QMessageBox.warning(self, "Error", "Number of Classrooms and Classroom Capacity must be integers.")
+                return
+
+            # Insert data into the database
+            self.db.insert_classroom_details(num_classrooms, classroom_numbers, lab_details, classroom_capacity)
+
+            # Move to the next form
+            QMessageBox.information(self, "Success", "Classroom details saved successfully.")
+            self.sidebar.setCurrentRow(2)
+
+        except Exception as e:
+            # Handle unexpected errors
+            QMessageBox.critical(self, "Error", f"An error occurred: {e}")
+
 
     def closeEvent(self, event):
         self.db.close()
