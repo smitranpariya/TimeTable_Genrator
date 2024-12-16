@@ -717,7 +717,7 @@ class TimetableForm(QWidget):
         save_button.clicked.connect(show_success_popup)
         button_layout.addWidget(save_button)
 
-        # Set fixed button widths
+        # Set fixed button width
         back_button.setFixedWidth(form.width() // 2)
         save_button.setFixedWidth(form.width() // 2)
 
