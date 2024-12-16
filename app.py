@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QComboBox, QListWidget, QListWidgetItem,QStackedWidget, QFrame,QMessageBox
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIntValidator
 
 from db_helper import DatabaseHelper
 
@@ -106,118 +107,129 @@ class TimetableForm(QWidget):
             self.load_classroom_details_form()
 
     def load_general_info_form(self):
-        title_label = QLabel("General Info.")
+        form = QFrame()
+        form.setStyleSheet("background-color: #D3CFCF; border-radius: 10px;")
+        layout = QVBoxLayout(form)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # Top content
+        top_content_layout = QVBoxLayout()
+        title_label = QLabel("General Info")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #000000;")
-        self.main_layout.addWidget(title_label)
+        top_content_layout.addWidget(title_label)
 
-        # Dictionary to store references to input fields
-        self.form_inputs = {}
-
+        # Fields
         fields = [
-            ("Academic Year", "e.g., 2023-2024"),
-            ("Semester", "1st Semester"),
-            ("Class Name/Section", "e.g., B.Tech CSE - A"),
-            ("Start and End Time", "e.g., 9:00 AM - 5:00 PM"),
+            "Academic Year",
+            "Semester",
+            "Class Name/Section"
         ]
 
-        for label_text, placeholder in fields:
-            # Add label for each field
+        self.form_inputs = {}  # Initialize the dictionary to store input fields
+
+        for label_text in fields:
             label = QLabel(label_text)
             label.setStyleSheet("font-size: 12px; font-weight: bold; color: #333333; margin-top: 10px;")
-            self.main_layout.addWidget(label)
+            top_content_layout.addWidget(label)
 
-            # Add input field based on field type
-            if label_text == "Semester":
-                combo_box = QComboBox()
-                combo_box.addItems(["1st Semester", "2nd Semester", "3rd Semester", "4th Semester"])
-                combo_box.setStyleSheet("""
-                    QComboBox {
-                        border: 1px solid #A0A0A0;
-                        padding: 5px;
-                        background-color: #FFFFFF;
-                        border-radius: 5px;
-                    }
-                """)
-                self.main_layout.addWidget(combo_box)
-                self.form_inputs[label_text] = combo_box  # Store reference
-            else:
-                line_edit = QLineEdit()
-                line_edit.setPlaceholderText(placeholder)
-                line_edit.setStyleSheet("""
-                    QLineEdit {
-                        border: 1px solid #A0A0A0;
-                        padding: 5px;
-                        background-color: #FFFFFF;
-                        border-radius: 5px;
-                    }
-                """)
-                self.main_layout.addWidget(line_edit)
-                self.form_inputs[label_text] = line_edit  # Store reference
+            line_edit = QLineEdit()
+            line_edit.setPlaceholderText(f"Enter {label_text.lower()}")  # Add placeholder dynamically
+            line_edit.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #A0A0A0;
+                    padding: 5px;
+                    background-color: #FFFFFF;
+                    border-radius: 5px;
+                }
+            """)
+            self.form_inputs[label_text] = line_edit  # Map the field to the input
+            top_content_layout.addWidget(line_edit)
 
-        # Add save button
+        layout.addLayout(top_content_layout)
+
+        # Add stretch before buttons
+        layout.addStretch()
+
+        # Bottom buttons
+        button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 10, 0, 0)
+
         save_button = QPushButton("Save and Next")
         save_button.setStyleSheet("""
             QPushButton {
                 background-color: #3A3A3A;
                 color: white;
                 padding: 10px;
-                border-radius: 5px;
                 font-size: 14px;
+                border-radius: 5px;
             }
             QPushButton:hover {
                 background-color: #555555;
             }
         """)
         save_button.clicked.connect(self.save_general_info)
-        self.main_layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignRight)
+        button_layout.addWidget(save_button)
+
+        # Align button to the center
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout)
+
+        return form
 
 
     def save_general_info(self):
-        # Retrieve values from input fields
-        academic_year = self.form_inputs["Academic Year"].text()
-        semester = self.form_inputs["Semester"].currentText()
-        class_name = self.form_inputs["Class Name/Section"].text()
-        start_end_time = self.form_inputs["Start and End Time"].text()
+        try:
+            # Extract and validate input values
+            academic_year = self.form_inputs["Academic Year"].text().strip()
+            semester = self.form_inputs["Semester"].text().strip()
+            class_name = self.form_inputs["Class Name/Section"].text().strip()
 
-        # Validate input
-        if not academic_year or not semester or not class_name or not start_end_time:
-            QMessageBox.warning(self, "Input Error", "Please fill in all fields.")
-            return
+            # Check for empty fields
+            if not all([academic_year, semester, class_name]):
+                QMessageBox.warning(self, "Error", "Please fill in all the fields.")
+                return
 
-        # Process start and end time
-        start_time, end_time = start_end_time.split("-") if "-" in start_end_time else (None, None)
-        if not start_time or not end_time:
-            QMessageBox.warning(self, "Input Error", "Please enter valid start and end times (e.g., 9:00 AM - 5:00 PM).")
-            return 
+            # Insert data into the database
+            self.db.insert_general_info(academic_year, semester, class_name)
 
-        # Save data
-        self.db.insert_general_info(academic_year, semester, class_name, start_end_time)
+            # Move to the next form
+            QMessageBox.information(self, "Success", "General information saved successfully.")
+            self.sidebar.setCurrentRow(1)
 
-        QMessageBox.information(self, "Success", "General info saved successfully!")
-        self.sidebar.setCurrentRow(1)  # Move to the next form
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
 
 
 
     def load_classroom_details_form(self):
-        # Title Label
+        form = QFrame()
+        form.setStyleSheet("background-color: #D3CFCF; border-radius: 10px;")
+        layout = QVBoxLayout(form)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # Top content
+        top_content_layout = QVBoxLayout()
         title_label = QLabel("Classroom Details")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #000000;")
-        self.main_layout.addWidget(title_label)
+        top_content_layout.addWidget(title_label)
 
-        # Field definitions
-        self.classroom_fields = {}
+        # Fields
         fields = [
-            ("Number of Classrooms", "e.g., 5"),
-            ("Classroom Numbers", "e.g., Room 101, Room 102"),
-            ("Lab Details", "e.g., Room 101, Room 102"),
-            ("Classroom Capacity", "e.g., 30"),
+            ("Number of Classrooms", ""),
+            ("Classroom Numbers", ""),
+            ("Lab Details", ""),
+            ("Classroom Capacity", "")
         ]
 
-        # Add fields to the form
+        self.classroom_fields = {}
+
         for label_text, placeholder in fields:
             label = QLabel(label_text)
             label.setStyleSheet("font-size: 12px; font-weight: bold; color: #333333; margin-top: 10px;")
-            self.main_layout.addWidget(label)
+            top_content_layout.addWidget(label)
 
             line_edit = QLineEdit()
             line_edit.setPlaceholderText(placeholder)
@@ -229,46 +241,60 @@ class TimetableForm(QWidget):
                     border-radius: 5px;
                 }
             """)
-            self.classroom_fields[label_text] = line_edit
-            self.main_layout.addWidget(line_edit)
+            if label_text in ["Number of Classrooms", "Classroom Capacity"]:
+                line_edit.setValidator(QIntValidator(0, 1000))  # Restrict to integers
 
-        # Back Button
+            top_content_layout.addWidget(line_edit)
+            self.classroom_fields[label_text] = line_edit  # Store reference to the field
+
+        layout.addLayout(top_content_layout)
+
+        # Add stretch before buttons
+        layout.addStretch()
+
+        # Bottom buttons
+        button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 10, 0, 0)
+
         back_button = QPushButton("Back")
         back_button.setStyleSheet("""
             QPushButton {
-                background-color: #F0F0F0;
-                color: #333333;
+                background-color: #555555;
+                color: white;
                 padding: 10px;
-                border-radius: 5px;
                 font-size: 14px;
+                border-radius: 5px;
             }
             QPushButton:hover {
-                background-color: #E0E0E0;
+                background-color: #777777;
             }
         """)
-        back_button.clicked.connect(lambda: self.sidebar.setCurrentRow(0))
-        self.main_layout.addWidget(back_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        back_button.clicked.connect(lambda: self.sidebar.setCurrentRow(0))  # Navigate to General Info
+        button_layout.addWidget(back_button)
 
-        # Save and Next Button
         save_button = QPushButton("Save and Next")
         save_button.setStyleSheet("""
             QPushButton {
                 background-color: #3A3A3A;
                 color: white;
                 padding: 10px;
-                border-radius: 5px;
                 font-size: 14px;
+                border-radius: 5px;
             }
             QPushButton:hover {
                 background-color: #555555;
             }
         """)
         save_button.clicked.connect(self.save_classroom_details)
-        self.main_layout.addWidget(save_button, alignment=Qt.AlignmentFlag.AlignRight)
+        button_layout.addWidget(save_button)
+
+        layout.addLayout(button_layout)
+
+        return form
 
     def save_classroom_details(self):
         try:
-            # Extract and validate input values
+            # Extract input values
             num_classrooms = self.classroom_fields["Number of Classrooms"].text().strip()
             classroom_numbers = self.classroom_fields["Classroom Numbers"].text().strip()
             lab_details = self.classroom_fields["Lab Details"].text().strip()
@@ -279,7 +305,7 @@ class TimetableForm(QWidget):
                 QMessageBox.warning(self, "Error", "Please fill in all the fields.")
                 return
 
-            # Convert numeric fields to integers and handle invalid input
+            # Convert numeric fields
             try:
                 num_classrooms = int(num_classrooms)
                 classroom_capacity = int(classroom_capacity)
@@ -290,13 +316,15 @@ class TimetableForm(QWidget):
             # Insert data into the database
             self.db.insert_classroom_details(num_classrooms, classroom_numbers, lab_details, classroom_capacity)
 
-            # Move to the next form
+            # Navigate to the next form
             QMessageBox.information(self, "Success", "Classroom details saved successfully.")
             self.sidebar.setCurrentRow(2)
 
+        except KeyError as e:
+            QMessageBox.critical(self, "Error", f"Missing field: {e}")
         except Exception as e:
-            # Handle unexpected errors
             QMessageBox.critical(self, "Error", f"An error occurred: {e}")
+
 
 
     # Start Faculty info form

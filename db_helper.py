@@ -19,10 +19,9 @@ class DatabaseHelper:
         self.cursor.execute("""
         CREATE TABLE IF NOT EXISTS GeneralInfo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            academic_year TEXT,
-            semester TEXT,
-            class_name TEXT,
-            start_end_time TEXT
+            "Academic Year" TEXT,
+            Semester TEXT,
+            "Class Name" TEXT
         )
         """)
         
@@ -39,18 +38,17 @@ class DatabaseHelper:
         
         self.conn.commit()
 
-    def insert_general_info(self, academic_year, semester, class_name, start_end_time):
-        """
-        Insert a record into the GeneralInfo table.
-        """
+    def insert_general_info(self, AcademicYear, semester, class_name):
         try:
-            self.cursor.execute("""
-            INSERT INTO GeneralInfo (academic_year, semester, class_name, start_end_time)
-            VALUES (?, ?, ?, ?)
-            """, (academic_year, semester, class_name, start_end_time))
+            query = """
+            INSERT INTO GeneralInfo ("Academic Year", Semester, "Class Name")
+            VALUES (?, ?, ?)
+            """
+            self.cursor.execute(query, (AcademicYear, semester, class_name))
             self.conn.commit()
-        except sqlite3.Error as e:
+        except Exception as e:
             print(f"An error occurred while inserting into GeneralInfo: {e}")
+
 
     def insert_classroom_details(self, num_classrooms, classroom_numbers, lab_details, classroom_capacity):
         """
