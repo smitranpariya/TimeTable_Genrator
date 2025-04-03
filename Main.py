@@ -27,35 +27,46 @@ class TimetableManager(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet("""
             QTabWidget::pane { border: none; }
-            QTabBar::tab { background: #444; color: white; padding: 10px; font-size: 14px; }
+            QTabBar::tab { background: #444; color: white; padding: 10px; margin:5px; font-size: 14px; }
             QTabBar::tab:selected { background: #1E90FF; }
         """)
 
-        self.tabs.tabBar().setStyleSheet("""
-            QTabBar::tab:last {
-                background:green;
-                margin-left: 630px;  /* Push last tab to the right */
-            }
-        """)
+        
 
         self.room_tab = QWidget()
         self.lab_tab = QWidget()
         self.strength_management_tab = QWidget()
         self.subject_tab = QWidget()
-        self.generate_timetable_tab = QWidget()
+        
 
         self.tabs.addTab(self.subject_tab, "Subject Management")
         self.tabs.addTab(self.room_tab, "Room Management")
         self.tabs.addTab(self.lab_tab, "Lab Management")
         self.tabs.addTab(self.strength_management_tab, "Strength Management")
-        self.tabs.addTab(self.generate_timetable_tab, "Generate Timetable")
+        self.generate_timetable_button = QPushButton("Generate Timetable")
+        self.generate_timetable_button.setStyleSheet("""
+            QPushButton {
+                background-color: Green; 
+                color: white; 
+                padding: 8px; 
+                margin-bottom:5px;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #87A96B; }
+        """)
+        self.generate_timetable_button.clicked.connect(self.openTimetableWizard)
+
+        # Insert the button into the tab bar
+        self.tabs.setCornerWidget(self.generate_timetable_button)
+
+        
 
         
         self.setupRoomTab()
         self.setupLabTab()
         self.setupStrengthTab()
         self.setupSubjectTab()
-        self.setupGenerateTimetableTab() 
+      
 
         
         main_layout.addWidget(self.tabs)
@@ -80,14 +91,7 @@ class TimetableManager(QWidget):
         self.strength_collection = self.db["strength_details"]
         self.subject_collection = self.db["Subject_collection"]
 
-    def setupGenerateTimetableTab(self):
-        """Setup Generate Timetable Tab (Opens Wizard on Click)"""
-        self.tabs.currentChanged.connect(self.handleTabChange)
-
-    def handleTabChange(self, index):
-        """Detects when the Generate Timetable tab is clicked"""
-        if self.tabs.tabText(index) == "Generate Timetable":
-            self.openTimetableWizard()
+    
 
 
     def openTimetableWizard(self):
