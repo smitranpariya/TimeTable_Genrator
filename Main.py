@@ -1,12 +1,85 @@
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, 
     QLineEdit, QTableWidget, QTableWidgetItem, QTabWidget, 
-    QMessageBox, QHeaderView, QHBoxLayout,QComboBox,QRadioButton,QMenuBar
+    QMessageBox, QHeaderView, QHBoxLayout,QComboBox,QRadioButton,QMenuBar,QGridLayout,QFrame
 )
 from PyQt6.QtGui import QFont, QColor, QPalette,QIntValidator,QAction
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt,QProcess,pyqtSignal
 from pymongo import MongoClient
 from timetable_logic import TimetableDialog
+from time_table_ui import Timetable
+
+class ClickableFrame(QFrame):
+    clicked = pyqtSignal(int, int, int)  # Signal for (year, semester, batch)
+
+    def __init__(self, year, semester, batch, parent=None):
+        super().__init__(parent)
+        self.year = year
+        self.semester = semester
+        self.batch = batch
+
+        # Frame styling
+        self.setStyleSheet("""
+            background-color: #007bff;
+            border-radius: 10px;
+            padding: 15px;
+            color: white;
+            font-size: 14px;
+        """)
+        self.setFixedSize(150, 150)  # Set uniform size for better alignment
+
+        # Label inside frame
+        label = QLabel(f"Year {year} - Sem {semester} - Batch {batch}")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Layout for the frame
+        layout = QVBoxLayout()
+        layout.addWidget(label)
+        layout.setContentsMargins(5, 5, 5, 5)
+        self.setLayout(layout)
+
+    def mousePressEvent(self, event):
+        """Emit signal when clicked"""
+        self.clicked.emit(self.year, self.semester, self.batch)
+
+class ViewTimetableTab(QWidget):
+    timetable_selected = pyqtSignal(int, int, int)  # Signal for (year, semester, batch)
+
+    def __init__(self):
+        super().__init__()
+        self.time_layout = QVBoxLayout()
+        self.setLayout(self.time_layout)
+        self.db = self.connectDB()
+        self.createTimetableBoxes()  # Changed to use boxes instead of buttons
+
+    def connectDB(self):
+        client = MongoClient("mongodb://localhost:27017/")
+        return client["timetable_db"]
+
+    def createTimetableBoxes(self):
+        grid_layout = QGridLayout()
+        timetables = self.db["timetable"].find()
+        row, col = 0, 0
+        max_cols = 3  # Adjust column count as needed
+
+        for entry in timetables:
+            year, semester, batch = entry["year"], entry["semester"], entry["batch"]
+            box = ClickableFrame(year, semester, batch)
+            box.clicked.connect(self.openTimetable)  # Connect signal to method
+            grid_layout.addWidget(box, row, col)
+
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+
+        self.time_layout.addLayout(grid_layout)  # Correctly adds to layout
+
+    def openTimetable(self, year, semester, batch):
+        """Handles opening timetable on box click"""
+        self.timetable_selected.emit(year, semester, batch)
+        self.timetable_ui = Timetable(batch, year, semester)
+        self.timetable_ui.show()
 
 class TimetableManager(QWidget):
     def __init__(self):
@@ -20,9 +93,7 @@ class TimetableManager(QWidget):
 
         # Main Layout
         main_layout = QVBoxLayout()
-
-        
-        
+   
         # Tab Widget
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet("""
@@ -31,18 +102,18 @@ class TimetableManager(QWidget):
             QTabBar::tab:selected { background: #1E90FF; }
         """)
 
-        
-
         self.room_tab = QWidget()
         self.lab_tab = QWidget()
         self.strength_management_tab = QWidget()
         self.subject_tab = QWidget()
+        self.view_timetable_tab = ViewTimetableTab()
         
 
         self.tabs.addTab(self.subject_tab, "Subject Management")
         self.tabs.addTab(self.room_tab, "Room Management")
         self.tabs.addTab(self.lab_tab, "Lab Management")
         self.tabs.addTab(self.strength_management_tab, "Strength Management")
+        self.tabs.addTab(self.view_timetable_tab,"View Timetables")
         self.generate_timetable_button = QPushButton("Generate Timetable")
         self.generate_timetable_button.setStyleSheet("""
             QPushButton {
@@ -60,15 +131,12 @@ class TimetableManager(QWidget):
         self.tabs.setCornerWidget(self.generate_timetable_button)
 
         
-
-        
         self.setupRoomTab()
         self.setupLabTab()
         self.setupStrengthTab()
         self.setupSubjectTab()
-      
-
         
+      
         main_layout.addWidget(self.tabs)
         self.setLayout(main_layout)
 
@@ -91,9 +159,6 @@ class TimetableManager(QWidget):
         self.strength_collection = self.db["strength_details"]
         self.subject_collection = self.db["Subject_collection"]
 
-    
-
-
     def openTimetableWizard(self):
         """Opens the timetable generation wizard"""
         wizard = TimetableDialog(self)
@@ -102,10 +167,17 @@ class TimetableManager(QWidget):
         # Optionally, switch back to another tab after closing
         self.tabs.setCurrentIndex(0)
 
-
     def setupSubjectTab(self):
         """UI Setup for Subject Management"""
         layout = QVBoxLayout()
+
+        # --- Mapping for Semesters by Year ---
+        self.year_semester_map = {
+            "1st Year": ["Semester 1", "Semester 2"],
+            "2nd Year": ["Semester 3", "Semester 4"],
+            "3rd Year": ["Semester 5", "Semester 6"],
+            "4th Year": ["Semester 7", "Semester 8"]
+        }
 
         # --- Input Fields ---
         input_layout = QHBoxLayout()
@@ -113,23 +185,25 @@ class TimetableManager(QWidget):
         self.subject_name.setPlaceholderText("Subject Name")
 
         self.faculty_input = QLineEdit(self)
-        self.faculty_input.setPlaceholderText("Faculty/TA Name")  # New faculty input
+        self.faculty_input.setPlaceholderText("Faculty/TA Name")
 
         self.year_dropdown = QComboBox(self)
-        self.year_dropdown.addItems(["1st Year", "2nd Year", "3rd Year", "4th Year"])
+        self.year_dropdown.addItems(self.year_semester_map.keys())
+        self.year_dropdown.currentTextChanged.connect(self.updateSemesterDropdown)
 
         self.semester_dropdown = QComboBox(self)
-        self.semester_dropdown.addItems(["Semester 1", "Semester 2"])
+        self.updateSemesterDropdown(self.year_dropdown.currentText())  # Initialize default semesters
 
         self.theory_radio = QRadioButton("Theory")
         self.lab_radio = QRadioButton("Lab")
-        self.theory_radio.setChecked(True)  # Default selection
+        self.theory_radio.setChecked(True)
 
         add_btn = QPushButton("Add Subject", self)
         add_btn.clicked.connect(self.addSubject)
 
+        # Add widgets to input layout
         input_layout.addWidget(self.subject_name)
-        input_layout.addWidget(self.faculty_input)  # Faculty Name input
+        input_layout.addWidget(self.faculty_input)
         input_layout.addWidget(self.year_dropdown)
         input_layout.addWidget(self.semester_dropdown)
         input_layout.addWidget(self.theory_radio)
@@ -147,6 +221,14 @@ class TimetableManager(QWidget):
         self.subject_tab.setLayout(layout)
         self.loadSubjects()
 
+
+    def updateSemesterDropdown(self, selected_year):
+        """Updates the semester dropdown based on selected year"""
+        semesters = self.year_semester_map.get(selected_year, [])
+        self.semester_dropdown.clear()
+        self.semester_dropdown.addItems(semesters)
+
+
     def addSubject(self):
         """Adds a new subject"""
         subject = self.subject_name.text().strip()
@@ -163,12 +245,12 @@ class TimetableManager(QWidget):
             QMessageBox.warning(self, "Error", "Faculty name is mandatory.")
             return
 
-        # Check if the exact subject (same name, year, semester, and type) already exists
+        # Check for duplicates
         existing_subject = self.subject_collection.find_one({
             "subject": subject,
             "year": year,
             "semester": semester,
-            "type": subject_type  # Now checking for the type as well
+            "type": subject_type
         })
 
         if existing_subject:
@@ -511,7 +593,6 @@ class TimetableManager(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An unexpected error occurred:\n{str(e)}")
-
 
 
 # Run the application
