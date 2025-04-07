@@ -77,7 +77,7 @@ class Timetable(QWidget):
         self.semester = semester
 
         self.setWindowTitle(f"Timetable for Batch {batch}, {year} Year - Semester {semester}")
-        self.setGeometry(100, 100, 750, 400)
+        self.setGeometry(100, 100, 1400,800)
 
         layout = QVBoxLayout()
 
@@ -97,6 +97,14 @@ class Timetable(QWidget):
             "1:30 - 2:30", "2:30 - 3:30", "3:30 - 4:30", "4:30 - 5:30"
         ])
 
+        # Increase column width
+        for col in range(6):
+            self.table.setColumnWidth(col, 200)  # Adjust width as needed
+
+        # Increase row height
+        for row in range(8):
+            self.table.setRowHeight(row, 80)  # Adjust height as needed
+
         self.populate_table()
 
         layout.addWidget(self.table)
@@ -104,6 +112,29 @@ class Timetable(QWidget):
         # Export Buttons
         export_layout = QHBoxLayout()
         self.export_image_button = QPushButton("Export as Image")
+        self.export_image_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1E90FF;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                font-size: 16px;
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background-color: white;
+                color: #1E90FF;
+                border: 2px solid #1E90FF;
+            }
+            QPushButton:pressed {
+                background-color: #1E90FF;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                font-size: 16px;
+                border-radius: 8px;
+            }
+        """)
         self.export_image_button.clicked.connect(self.export_as_image)
         export_layout.addWidget(self.export_image_button)
         layout.addLayout(export_layout)
@@ -175,6 +206,7 @@ class Timetable(QWidget):
         if col == -1 or row == -1:
             return
         item = QTableWidgetItem(text)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
 
         if session_type == "Lab":
