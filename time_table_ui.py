@@ -179,9 +179,18 @@ class Timetable(QWidget):
                     if session:
                         subject = session.get("subject", "N/A")
                         subject_type = session.get("type", "N/A")
-                        text = f"{subject} ({subject_type})"
+                        if subject_type == "Lab":
+                            location = session.get("lab", "N/A")
+                            location_text = f"Lab: {location}"
+                        elif subject_type == "Office":
+                            location_text = "Office Hour"
+                        else:
+                            location = session.get("room", "N/A")
+                            location_text = f"Room: {location}"
+                        
+                        text = f"{subject} ({subject_type})\n{location_text}"
                     else:
-                        text = "Free"
+                        text = "Office Hour"
 
                     self.set_cell(row, col, text, session.get("type", "Office") if session else "Office")
 
