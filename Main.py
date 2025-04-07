@@ -1,16 +1,17 @@
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, 
     QLineEdit, QTableWidget, QTableWidgetItem, QTabWidget, 
-    QMessageBox, QHeaderView, QHBoxLayout,QComboBox,QRadioButton,QMenuBar,QGridLayout,QFrame
+    QMessageBox, QHeaderView, QHBoxLayout,QComboBox,QRadioButton,QMenuBar,QGridLayout,QFrame,QSizePolicy
 )
 from PyQt6.QtGui import QFont, QColor, QPalette,QIntValidator,QAction
 from PyQt6.QtCore import Qt,QProcess,pyqtSignal
 from pymongo import MongoClient
 from timetable_logic import TimetableDialog
 from time_table_ui import Timetable
+from timetable_logic import TimetableGenerator
 
 class ClickableFrame(QFrame):
-    clicked = pyqtSignal(int, int, int)  # Signal for (year, semester, batch)
+    clicked = pyqtSignal(int, int, int)
 
     def __init__(self, year, semester, batch, parent=None):
         super().__init__(parent)
@@ -18,29 +19,30 @@ class ClickableFrame(QFrame):
         self.semester = semester
         self.batch = batch
 
-        # Frame styling
         self.setStyleSheet("""
-            background-color: #007bff;
-            border-radius: 10px;
-            padding: 15px;
-            color: white;
-            font-size: 14px;
+            QFrame {
+                background-color: #007bff;
+                border-radius: 10px;
+                color: white;
+                font-size: 16px;
+            }
+            QFrame:hover {
+                border: 2px solid white;       /* On hover: white border */
+            }
         """)
-        self.setFixedSize(150, 150)  # Set uniform size for better alignment
 
-        # Label inside frame
         label = QLabel(f"Year {year} - Sem {semester} - Batch {batch}")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Layout for the frame
         layout = QVBoxLayout()
         layout.addWidget(label)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(0, 0, 0, 0)  # ✨ IMPORTANT
         self.setLayout(layout)
 
     def mousePressEvent(self, event):
-        """Emit signal when clicked"""
         self.clicked.emit(self.year, self.semester, self.batch)
+
+
 
 class ViewTimetableTab(QWidget):
     timetable_selected = pyqtSignal(int, int, int)  # Signal for (year, semester, batch)
@@ -50,36 +52,54 @@ class ViewTimetableTab(QWidget):
         self.time_layout = QVBoxLayout()
         self.setLayout(self.time_layout)
         self.db = self.connectDB()
-        self.createTimetableBoxes()  # Changed to use boxes instead of buttons
+        self.createTimetableBoxes()
+
 
     def connectDB(self):
         client = MongoClient("mongodb://localhost:27017/")
         return client["timetable_db"]
 
     def createTimetableBoxes(self):
-        grid_layout = QGridLayout()
+        vbox = QVBoxLayout()
+        vbox.setSpacing(10)
+        vbox.setContentsMargins(10, 10, 10, 10)
+
         timetables = self.db["timetable"].find()
-        row, col = 0, 0
-        max_cols = 3  # Adjust column count as needed
 
         for entry in timetables:
             year, semester, batch = entry["year"], entry["semester"], entry["batch"]
             box = ClickableFrame(year, semester, batch)
-            box.clicked.connect(self.openTimetable)  # Connect signal to method
-            grid_layout.addWidget(box, row, col)
 
-            col += 1
-            if col >= max_cols:
-                col = 0
-                row += 1
+            # Ensure full width
+            box.setMinimumHeight(50)
+            box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        self.time_layout.addLayout(grid_layout)  # Correctly adds to layout
+            box.clicked.connect(self.openTimetable)
+
+            # Add to layout
+            vbox.addWidget(box)
+
+        vbox.addStretch(1)  # Pushes items to the top
+        self.time_layout.addLayout(vbox)
 
     def openTimetable(self, year, semester, batch):
-        """Handles opening timetable on box click"""
         self.timetable_selected.emit(year, semester, batch)
         self.timetable_ui = Timetable(batch, year, semester)
         self.timetable_ui.show()
+
+    def refreshTimetable(self):
+        """Refresh the timetable display."""
+        # Clear the current layout
+        while self.time_layout.count():
+            item = self.time_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        # Recreate the timetable boxes
+        self.createTimetableBoxes()
+
+
 
 class TimetableManager(QWidget):
     def __init__(self):
@@ -98,8 +118,16 @@ class TimetableManager(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet("""
             QTabWidget::pane { border: none; }
-            QTabBar::tab { background: #444; color: white; padding: 10px; margin:5px; font-size: 14px; }
-            QTabBar::tab:selected { background: #1E90FF; }
+            QTabBar::tab { 
+                background: #505168; 
+                color: white; 
+                padding: 10px; 
+                font-size: 14px; 
+                margin: 5px; /* Adds spacing between tabs */
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QTabBar::tab:selected { background: #ada7c9}
         """)
 
         self.room_tab = QWidget()
@@ -117,13 +145,15 @@ class TimetableManager(QWidget):
         self.generate_timetable_button = QPushButton("Generate Timetable")
         self.generate_timetable_button.setStyleSheet("""
             QPushButton {
-                background-color: Green; 
+                background: #1E90FF; 
                 color: white; 
                 padding: 8px; 
                 margin-bottom:5px;
                 border-radius: 5px;
+                font-weight: bold;                   
             }
-            QPushButton:hover { background-color: #87A96B; }
+            QPushButton:hover { background: #FFFFFF;
+                color: #1E90FF;}
         """)
         self.generate_timetable_button.clicked.connect(self.openTimetableWizard)
 
@@ -141,10 +171,10 @@ class TimetableManager(QWidget):
         self.setLayout(main_layout)
 
         self.setStyleSheet("""
-            QWidget { background-color: #2E2E2E; color: white; font-size: 14px; }
-            QPushButton { background-color: #1E90FF; color: white; padding: 8px; border-radius: 5px; }
-            QPushButton:hover { background-color: #4169E1; }
-            QLineEdit { background-color: #444; color: white; padding: 5px; border-radius: 3px; }
+            QWidget { background-color: #242423; color: white; font-size: 14px; }
+            QPushButton { background-color: #1E90FF; color: white; padding: 8px; border-radius: 5px;font-weight: bold; }
+            QPushButton:hover { background-color: #FFFFFF; color: #1E90FF; }
+            QLineEdit { background-color: #505168; color: white; padding: 5px; border-radius: 4px; }
             QLabel { font-size: 16px; }
         """)
 
@@ -162,10 +192,12 @@ class TimetableManager(QWidget):
     def openTimetableWizard(self):
         """Opens the timetable generation wizard"""
         wizard = TimetableDialog(self)
+        wizard.timetable_generated.connect(self.view_timetable_tab.refreshTimetable)
         wizard.exec()  # Open the wizard dialog
 
         # Optionally, switch back to another tab after closing
         self.tabs.setCurrentIndex(0)
+
 
     def setupSubjectTab(self):
         """UI Setup for Subject Management"""
@@ -196,6 +228,8 @@ class TimetableManager(QWidget):
 
         self.theory_radio = QRadioButton("Theory")
         self.lab_radio = QRadioButton("Lab")
+        self.tutorial_radio = QRadioButton("Tutorial")
+
         self.theory_radio.setChecked(True)
 
         add_btn = QPushButton("Add Subject", self)
@@ -207,12 +241,23 @@ class TimetableManager(QWidget):
         input_layout.addWidget(self.year_dropdown)
         input_layout.addWidget(self.semester_dropdown)
         input_layout.addWidget(self.theory_radio)
+        input_layout.addWidget(self.tutorial_radio)
         input_layout.addWidget(self.lab_radio)
         input_layout.addWidget(add_btn)
 
         # --- Table to Display Subjects ---
         self.subject_table = QTableWidget(0, 5)
         self.subject_table.setHorizontalHeaderLabels(["Subject", "Faculty", "Year", "Semester", "Type"])
+        self.subject_table.setStyleSheet("""
+            QHeaderView::section {
+                border: 1px solid #F5F5F5;
+                color : #444;
+                font-weight: bold;
+            }
+            QTableWidget::item {
+                border: 1px solid white;
+            }
+        """)
         self.subject_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         layout.addLayout(input_layout)
@@ -235,7 +280,15 @@ class TimetableManager(QWidget):
         faculty = self.faculty_input.text().strip()
         year = self.year_dropdown.currentText()
         semester = self.semester_dropdown.currentText()
-        subject_type = "Theory" if self.theory_radio.isChecked() else "Lab"
+
+        if self.theory_radio.isChecked():
+            subject_type = "Theory"
+        elif self.lab_radio.isChecked():
+            subject_type = "Lab"
+        elif self.tutorial_radio.isChecked():
+            subject_type = "Tutorial"
+        else:
+            subject_type = "Unknown"
 
         if not subject:
             QMessageBox.warning(self, "Error", "Please enter a subject name.")
@@ -271,18 +324,18 @@ class TimetableManager(QWidget):
         self.faculty_input.clear()
         self.loadSubjects()
 
+
     def loadSubjects(self):
-        """Loads subjects from database into the table"""
+        """Loads subjects from database into the table with center aligned cells"""
         self.subject_table.setRowCount(0)
         subjects = self.subject_collection.find()
-        
+
         for row, subject in enumerate(subjects):
             self.subject_table.insertRow(row)
-            self.subject_table.setItem(row, 0, QTableWidgetItem(subject["subject"]))
-            self.subject_table.setItem(row, 1, QTableWidgetItem(subject["faculty"]))  # Display faculty
-            self.subject_table.setItem(row, 2, QTableWidgetItem(subject["year"]))
-            self.subject_table.setItem(row, 3, QTableWidgetItem(subject["semester"]))
-            self.subject_table.setItem(row, 4, QTableWidgetItem(subject["type"]))
+            for col, key in enumerate(["subject", "faculty", "year", "semester", "type"]):
+                item = QTableWidgetItem(subject[key])
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.subject_table.setItem(row, col, item)
 
     def deleteSubject(self):
         """Deletes a selected subject"""
@@ -351,6 +404,16 @@ class TimetableManager(QWidget):
         # Table to display strength data
         self.strength_table = QTableWidget(0, 3)
         self.strength_table.setHorizontalHeaderLabels(["Year", "Sections", "Students"])
+        self.strength_management_tab.setStyleSheet("""
+            QHeaderView::section {
+                border: 1px solid #F5F5F5;
+                color : #444;
+                font-weight: bold;
+            }
+            QTableWidget::item {
+                border: 1px solid white;
+            }
+        """)
         self.strength_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         layout.addLayout(input_layout)
@@ -383,9 +446,19 @@ class TimetableManager(QWidget):
         self.strength_table.setRowCount(0)
         for row, strength in enumerate(self.strength_collection.find()):
             self.strength_table.insertRow(row)
-            self.strength_table.setItem(row, 0, QTableWidgetItem(str(strength["year"])))
-            self.strength_table.setItem(row, 1, QTableWidgetItem(str(strength["sections"])))
-            self.strength_table.setItem(row, 2, QTableWidgetItem(str(strength["students"])))
+
+            year_item = QTableWidgetItem(str(strength["year"]))
+            year_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.strength_table.setItem(row, 0, year_item)
+
+            section_item = QTableWidgetItem(str(strength["sections"]))
+            section_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.strength_table.setItem(row, 1, section_item)
+
+            student_item = QTableWidgetItem(str(strength["students"]))
+            student_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.strength_table.setItem(row, 2, student_item)
+
 
     def deleteStrength(self, row):
         """Deletes strength record"""
@@ -418,8 +491,18 @@ class TimetableManager(QWidget):
         input_layout.addWidget(self.room_capacity)
         input_layout.addWidget(add_btn)
 
-        self.room_table = QTableWidget(0, 3)
-        self.room_table.setHorizontalHeaderLabels(["Room Number", "Capacity", "Actions"])
+        self.room_table = QTableWidget(0, 2)
+        self.room_table.setHorizontalHeaderLabels(["Room Number", "Capacity"])
+        self.room_table.setStyleSheet("""
+            QHeaderView::section {
+                border: 1px solid #F5F5F5;
+                color : #444;
+                font-weight: bold;
+            }
+            QTableWidget::item {
+                border: 1px solid white;
+            }
+        """)
         self.room_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         
 
@@ -455,12 +538,15 @@ class TimetableManager(QWidget):
 
         for row, room in enumerate(self.room_collection.find()):
             self.room_table.insertRow(row)
-            self.room_table.setItem(row, 0, QTableWidgetItem(room["room_no"]))
-            self.room_table.setItem(row, 1, QTableWidgetItem(str(room["capacity"])))
 
-            delete_btn = QPushButton("Delete")
-            delete_btn.clicked.connect(lambda _, r=row: self.deleteRoom(r))
-            self.room_table.setCellWidget(row, 2, delete_btn)
+            room_item = QTableWidgetItem(room["room_no"])
+            room_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.room_table.setItem(row, 0, room_item)
+
+            capacity_item = QTableWidgetItem(str(room["capacity"]))
+            capacity_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.room_table.setItem(row, 1, capacity_item)
+
 
 
 
@@ -511,8 +597,18 @@ class TimetableManager(QWidget):
         input_layout.addWidget(add_btn)
 
         # Lab Table Setup
-        self.lab_table = QTableWidget(0, 3)  # Added extra column for actions
-        self.lab_table.setHorizontalHeaderLabels(["Lab Number", "Lab Capacity", "Actions"])
+        self.lab_table = QTableWidget(0, 2)  # Added extra column for actions
+        self.lab_table.setHorizontalHeaderLabels(["Lab Number", "Lab Capacity"])
+        self.lab_table.setStyleSheet("""
+            QHeaderView::section {
+                border: 1px solid #F5F5F5;
+                color : #444;
+                font-weight: bold;
+            }
+            QTableWidget::item {
+                border: 1px solid white;
+            }
+        """)
         self.lab_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
        
 
@@ -551,14 +647,15 @@ class TimetableManager(QWidget):
 
         for row, lab in enumerate(self.lab_collection.find()):
             self.lab_table.insertRow(row)
-            self.lab_table.setItem(row, 0, QTableWidgetItem(lab["lab_no"]))
-            self.lab_table.setItem(row, 1, QTableWidgetItem(str(lab["strength"])))
-            
 
-            # Add Delete Button
-            delete_btn = QPushButton("Delete")
-            delete_btn.clicked.connect(lambda _, r=row: self.deleteLab(r))
-            self.lab_table.setCellWidget(row, 2, delete_btn)
+            lab_item = QTableWidgetItem(lab["lab_no"])
+            lab_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.lab_table.setItem(row, 0, lab_item)
+
+            capacity_item = QTableWidgetItem(str(lab["strength"]))
+            capacity_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.lab_table.setItem(row, 1, capacity_item)
+
 
 
     def deleteLab(self, row):
