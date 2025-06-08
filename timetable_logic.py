@@ -334,39 +334,54 @@ class TimetableGenerator:
         num_batches = int(strength_info["sections"])
         batch_strength = round(total_strength / num_batches)
 
-        # Initialize occupancy tracking
-        occupancy = {day: {slot: {"rooms": [], "labs": []} for slot in time_slots} for day in days}
+        # Initialize or fetch occupancy tracking
+        occupancy_collection = self.db["room_lab_occupancy"]
+        occupancy = occupancy_collection.find_one() or {day: {slot: {"rooms": [], "labs": []} for slot in time_slots} for day in days}
 
         for timetable in timetables:
             for day, slots in timetable["data"].items():
-                for slot, session in slots.items():
-                    if session:
-                        if session["type"] == "Lab":
-                            # Assign a lab
-                            assigned_lab = None
-                            for lab in labs:
-                                if lab["strength"] >= batch_strength and lab["lab_no"] not in occupancy[day][slot]["labs"]:
-                                    assigned_lab = lab["lab_no"]
-                                    occupancy[day][slot]["labs"].append(assigned_lab)
-                                    break
-                            if assigned_lab:
-                                session["lab"] = assigned_lab
-                            else:
-                                print(f"Warning: No available lab for {session['subject']} on {day} at {slot}.")
+                for slot_index, slot in enumerate(time_slots):
+                    session = slots.get(slot)
+                    if session and session["type"] == "Lab":
+                        # Ensure two consecutive slots are available in the same lab
+                        if slot_index < len(time_slots) - 1:
+                            next_slot = time_slots[slot_index + 1]
+                            next_session = slots.get(next_slot)
+                            if next_session and next_session["type"] == "Lab":
+                                assigned_lab = None
+                                for lab in labs:
+                                    if (lab["strength"] >= batch_strength and
+                                        lab["lab_no"] not in occupancy[day][slot]["labs"] and
+                                        lab["lab_no"] not in occupancy[day][next_slot]["labs"]):
+                                        assigned_lab = lab["lab_no"]
+                                        occupancy[day][slot]["labs"].append(assigned_lab)
+                                        occupancy[day][next_slot]["labs"].append(assigned_lab)
+                                        break
+                                if assigned_lab:
+                                    session["lab"] = assigned_lab
+                                    next_session["lab"] = assigned_lab
+                                else:
+                                    print(f"Warning: No available lab for {session['subject']} on {day} at {slot} and {next_slot}.")
 
-                        elif session["type"] in ["Theory", "Tutorial"]:
-                            # Assign a classroom
-                            assigned_room = None
-                            for room in rooms:
-                                if room["capacity"] >= batch_strength and room["room_no"] not in occupancy[day][slot]["rooms"]:
-                                    assigned_room = room["room_no"]
-                                    occupancy[day][slot]["rooms"].append(assigned_room)
-                                    break
-                            if assigned_room:
-                                session["room"] = assigned_room
-                            else:
-                                print(f"Warning: No available room for {session['subject']} on {day} at {slot}.")
+                    elif session and session["type"] in ["Theory", "Tutorial"]:
+                        # Assign a classroom
+                        assigned_room = None
+                        for room in rooms:
+                            if room["capacity"] >= batch_strength and room["room_no"] not in occupancy[day][slot]["rooms"]:
+                                assigned_room = room["room_no"]
+                                occupancy[day][slot]["rooms"].append(assigned_room)
+                                break
+                        if assigned_room:
+                            session["room"] = assigned_room
+                        else:
+                            print(f"Warning: No available room for {session['subject']} on {day} at {slot}.")
 
+        # Update the occupancy collection
+        occupancy_collection.update_one(
+            {},
+            {"$set": occupancy},
+            upsert=True
+        )
 
 
 

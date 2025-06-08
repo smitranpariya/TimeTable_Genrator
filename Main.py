@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, 
+    QApplication, QWidget, QVBoxLayout, QPushButton, QLabel,QMainWindow,
     QLineEdit, QTableWidget, QTableWidgetItem, QTabWidget, 
-    QMessageBox, QHeaderView, QHBoxLayout,QComboBox,QRadioButton,QMenuBar,QGridLayout,QFrame,QSizePolicy
+    QMessageBox, QHeaderView, QHBoxLayout,QComboBox,QRadioButton,QMenuBar,QGridLayout,QFrame,QSizePolicy,QCheckBox
 )
 from PyQt6.QtGui import QFont, QColor, QPalette,QIntValidator,QAction
 from PyQt6.QtCore import Qt,QProcess,pyqtSignal
@@ -223,14 +223,19 @@ class TimetableManager(QWidget):
         self.year_dropdown.addItems(self.year_semester_map.keys())
         self.year_dropdown.currentTextChanged.connect(self.updateSemesterDropdown)
 
+        self.specialization_dropdown = QComboBox(self)
+        self.specialization_dropdown.addItems(["AI", "CS", "DS", "Cloud Computing"])
+        self.specialization_dropdown.setVisible(False)
+
         self.semester_dropdown = QComboBox(self)
         self.updateSemesterDropdown(self.year_dropdown.currentText())  # Initialize default semesters
 
-        self.theory_radio = QRadioButton("Theory")
-        self.lab_radio = QRadioButton("Lab")
-        self.tutorial_radio = QRadioButton("Tutorial")
+        self.theory_checkbox = QCheckBox("Theory")
+        self.lab_checkbox = QCheckBox("Lab")
+        self.tutorial_checkbox = QCheckBox("Tutorial")
 
-        self.theory_radio.setChecked(True)
+
+        self.theory_checkbox.setChecked(True)
 
         add_btn = QPushButton("Add Subject", self)
         add_btn.clicked.connect(self.addSubject)
@@ -239,10 +244,11 @@ class TimetableManager(QWidget):
         input_layout.addWidget(self.subject_name)
         input_layout.addWidget(self.faculty_input)
         input_layout.addWidget(self.year_dropdown)
+        input_layout.addWidget(self.specialization_dropdown)
         input_layout.addWidget(self.semester_dropdown)
-        input_layout.addWidget(self.theory_radio)
-        input_layout.addWidget(self.tutorial_radio)
-        input_layout.addWidget(self.lab_radio)
+        input_layout.addWidget(self.theory_checkbox)
+        input_layout.addWidget(self.tutorial_checkbox)
+        input_layout.addWidget(self.lab_checkbox)
         input_layout.addWidget(add_btn)
 
         # --- Table to Display Subjects ---
@@ -268,10 +274,14 @@ class TimetableManager(QWidget):
 
 
     def updateSemesterDropdown(self, selected_year):
-        """Updates the semester dropdown based on selected year"""
         semesters = self.year_semester_map.get(selected_year, [])
         self.semester_dropdown.clear()
         self.semester_dropdown.addItems(semesters)
+
+        if selected_year in ["3rd Year", "4th Year"]:
+            self.specialization_dropdown.setVisible(True)
+        else:
+            self.specialization_dropdown.setVisible(False)
 
 
     def addSubject(self):
@@ -281,14 +291,13 @@ class TimetableManager(QWidget):
         year = self.year_dropdown.currentText()
         semester = self.semester_dropdown.currentText()
 
-        if self.theory_radio.isChecked():
-            subject_type = "Theory"
-        elif self.lab_radio.isChecked():
-            subject_type = "Lab"
-        elif self.tutorial_radio.isChecked():
-            subject_type = "Tutorial"
-        else:
-            subject_type = "Unknown"
+        types = []
+        if self.theory_checkbox.isChecked():
+            types.append("Theory")
+        if self.lab_checkbox.isChecked():
+            types.append("Lab")
+        if self.tutorial_checkbox.isChecked():
+            types.append("Tutorial")
 
         if not subject:
             QMessageBox.warning(self, "Error", "Please enter a subject name.")
@@ -298,31 +307,47 @@ class TimetableManager(QWidget):
             QMessageBox.warning(self, "Error", "Faculty name is mandatory.")
             return
 
+        if not types:
+            QMessageBox.warning(self, "Error", "Please select at least one type (Theory/Lab/Tutorial).")
+            return
+
+        # Handle specialization
+        specialization = ""
+        if self.specialization_dropdown.isVisible():
+            specialization = self.specialization_dropdown.currentText()
+
         # Check for duplicates
         existing_subject = self.subject_collection.find_one({
             "subject": subject,
             "year": year,
             "semester": semester,
-            "type": subject_type
+            "specialization": specialization
         })
-
         if existing_subject:
-            QMessageBox.warning(self, "Error", f"'{subject}' ({subject_type}) is already assigned in {year} - {semester}.")
+            QMessageBox.warning(
+                self, "Error",
+                f"'{subject}' is already assigned in {year} - {semester} ({specialization})."
+            )
             return
 
-        # Insert into the database
-        self.subject_collection.insert_one({
+        # Prepare document to insert
+        subject_doc = {
             "subject": subject,
             "faculty": faculty,
             "year": year,
             "semester": semester,
-            "type": subject_type
-        })
+            "type": ", ".join(types),
+            "specialization": specialization
+        }
 
-        QMessageBox.information(self, "Success", f"Subject '{subject}' ({subject_type}) added successfully!")
+        # Insert into the database
+        self.subject_collection.insert_one(subject_doc)
+
+        QMessageBox.information(self, "Success", f"Subject '{subject}' added successfully!")
         self.subject_name.clear()
         self.faculty_input.clear()
         self.loadSubjects()
+
 
 
     def loadSubjects(self):
@@ -332,10 +357,25 @@ class TimetableManager(QWidget):
 
         for row, subject in enumerate(subjects):
             self.subject_table.insertRow(row)
-            for col, key in enumerate(["subject", "faculty", "year", "semester", "type"]):
-                item = QTableWidgetItem(subject[key])
+
+            # Prepare year text with specialization if exists
+            year_text = subject["year"]
+            if subject.get("specialization"):
+                year_text += f" ({subject['specialization']})"
+
+            values = [
+                subject["subject"],
+                subject["faculty"],
+                year_text,
+                subject["semester"],
+                subject["type"]
+            ]
+
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.subject_table.setItem(row, col, item)
+
 
     def deleteSubject(self):
         """Deletes a selected subject"""

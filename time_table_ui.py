@@ -22,7 +22,7 @@ class TimetableSelectionDialog(QDialog):
         self.batch_combo.addItems(["1", "2"])  
         layout.addWidget(QLabel("Select Batch:"))
         layout.addWidget(self.batch_combo)
-
+        
         # Year selection
         self.year_combo = QComboBox()
         self.year_combo.addItems(["First", "Second", "Third", "Final"])
@@ -222,6 +222,8 @@ class Timetable(QWidget):
             item.setBackground(QBrush(QColor("#90EE90")))
         elif session_type == "Office":
             item.setBackground(QBrush(QColor("#FFFFE0")))
+        elif session_type == "Tutorial":
+            item.setBackground(QBrush(QColor("#C68EFD")))
         else:
             item.setBackground(QBrush(QColor("#ADD8E6")))
 
