@@ -217,7 +217,11 @@ class TimetableManager(QWidget):
         self.subject_name.setPlaceholderText("Subject Name")
 
         self.faculty_input = QLineEdit(self)
-        self.faculty_input.setPlaceholderText("Faculty/TA Name")
+        self.faculty_input.setPlaceholderText("Faculty Name")
+
+        self.ta_input = QLineEdit(self)
+        self.ta_input.setPlaceholderText("TA Name")
+
 
         self.year_dropdown = QComboBox(self)
         self.year_dropdown.addItems(self.year_semester_map.keys())
@@ -243,6 +247,7 @@ class TimetableManager(QWidget):
         # Add widgets to input layout
         input_layout.addWidget(self.subject_name)
         input_layout.addWidget(self.faculty_input)
+        input_layout.addWidget(self.ta_input)
         input_layout.addWidget(self.year_dropdown)
         input_layout.addWidget(self.specialization_dropdown)
         input_layout.addWidget(self.semester_dropdown)
@@ -253,7 +258,7 @@ class TimetableManager(QWidget):
 
         # --- Table to Display Subjects ---
         self.subject_table = QTableWidget(0, 5)
-        self.subject_table.setHorizontalHeaderLabels(["Subject", "Faculty", "Year", "Semester", "Type"])
+        self.subject_table.setHorizontalHeaderLabels(["Subject", "Assigned To", "Year", "Semester", "Type"])
         self.subject_table.setStyleSheet("""
             QHeaderView::section {
                 border: 1px solid #F5F5F5;
@@ -288,6 +293,7 @@ class TimetableManager(QWidget):
         """Adds a new subject"""
         subject = self.subject_name.text().strip()
         faculty = self.faculty_input.text().strip()
+        ta = self.ta_input.text().strip()
         year = self.year_dropdown.currentText()
         semester = self.semester_dropdown.currentText()
 
@@ -304,8 +310,13 @@ class TimetableManager(QWidget):
             return
 
         if not faculty:
-            QMessageBox.warning(self, "Error", "Faculty name is mandatory.")
+            QMessageBox.warning(self, "Error", "Faculty name is mandatory for Theory subjects.")
             return
+
+        if (self.lab_checkbox.isChecked() or self.tutorial_checkbox.isChecked()) and not ta:
+            QMessageBox.warning(self, "Error", "TA name is mandatory for Lab/Tutorial subjects.")
+            return
+
 
         if not types:
             QMessageBox.warning(self, "Error", "Please select at least one type (Theory/Lab/Tutorial).")
@@ -316,65 +327,129 @@ class TimetableManager(QWidget):
         if self.specialization_dropdown.isVisible():
             specialization = self.specialization_dropdown.currentText()
 
-        # Check for duplicates
-        existing_subject = self.subject_collection.find_one({
-            "subject": subject,
-            "year": year,
-            "semester": semester,
-            "specialization": specialization
-        })
-        if existing_subject:
-            QMessageBox.warning(
-                self, "Error",
-                f"'{subject}' is already assigned in {year} - {semester} ({specialization})."
-            )
-            return
+        inserted_count = 0
 
-        # Prepare document to insert
-        subject_doc = {
-            "subject": subject,
-            "faculty": faculty,
-            "year": year,
-            "semester": semester,
-            "type": ", ".join(types),
-            "specialization": specialization
-        }
+        for t in types:
+            # Check for duplicates of subject+type
+            existing_subject = self.subject_collection.find_one({
+                "subject": subject,
+                "year": year,
+                "semester": semester,
+                "type": t,
+                "specialization": specialization
+            })
 
-        # Insert into the database
-        self.subject_collection.insert_one(subject_doc)
+            if existing_subject:
+                QMessageBox.warning(
+                    self, "Duplicate Entry",
+                    f"'{subject}' ({t}) is already assigned in {year} - {semester} ({specialization})."
+                )
+                continue  # Skip this type if already exists
 
-        QMessageBox.information(self, "Success", f"Subject '{subject}' added successfully!")
-        self.subject_name.clear()
-        self.faculty_input.clear()
-        self.loadSubjects()
+            # Prepare document to insert
+            subject_doc = {
+                "subject": subject,
+                "year": year,
+                "semester": semester,
+                "type": t,
+                "specialization": specialization
+            }
+
+            if t == "Theory":
+                subject_doc["faculty"] = faculty
+            else:
+                subject_doc["ta"] = ta
 
 
+            self.subject_collection.insert_one(subject_doc)
+            inserted_count += 1
+
+        if inserted_count:
+            QMessageBox.information(self, "Success", f"Subject '{subject}' added successfully ({inserted_count} types)!")
+            self.subject_name.clear()
+            self.faculty_input.clear()
+            self.ta_input.clear()
+            self.loadSubjects()
+        else:
+            QMessageBox.information(self, "Info", f"No new subject types were added.")
 
     def loadSubjects(self):
         """Loads subjects from database into the table with center aligned cells"""
         self.subject_table.setRowCount(0)
-        subjects = self.subject_collection.find()
+        subjects = list(self.subject_collection.find())
 
-        for row, subject in enumerate(subjects):
-            self.subject_table.insertRow(row)
+        added_keys = set()
+
+        for subject in subjects:
+            year = subject["year"]
+            semester = subject["semester"]
+            specialization = subject.get("specialization", "")
+            subject_name = subject["subject"]
 
             # Prepare year text with specialization if exists
-            year_text = subject["year"]
-            if subject.get("specialization"):
-                year_text += f" ({subject['specialization']})"
+            year_text = year
+            if specialization:
+                year_text += f" ({specialization})"
 
-            values = [
-                subject["subject"],
-                subject["faculty"],
-                year_text,
-                subject["semester"],
-                subject["type"]
-            ]
+            # Check if this subject-year-semester-specialization already processed
+            key = (subject_name, year, semester, specialization)
+            if key in added_keys:
+                continue  # skip if already processed
 
-            for col, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.subject_table.setItem(row, col, item)
+            # Fetch all types for this subject-year-semester-specialization
+            types_cursor = self.subject_collection.find({
+                "subject": subject_name,
+                "year": year,
+                "semester": semester,
+                "specialization": specialization
+            })
+
+            theory_names = []
+            lab_tut_names = []
+            theory_types = []
+            lab_tut_types = []
+
+            for sub in types_cursor:
+                if sub["type"] == "Theory":
+                    theory_names.append(sub.get("faculty", ""))
+                    theory_types.append("Theory")
+                else:
+                    lab_tut_names.append(sub.get("ta", ""))
+                    lab_tut_types.append(sub["type"])
+
+            # Add Theory row if exists
+            if theory_types:
+                self.subject_table.insertRow(self.subject_table.rowCount())
+                values = [
+                    subject_name,
+                    ", ".join(set(theory_names)),
+                    year_text,
+                    semester,
+                    ", ".join(theory_types)
+                ]
+                for col, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.subject_table.setItem(self.subject_table.rowCount() - 1, col, item)
+
+            # Add Lab+Tutorial row if exists
+            if lab_tut_types:
+                self.subject_table.insertRow(self.subject_table.rowCount())
+                values = [
+                    subject_name,
+                    ", ".join(set(lab_tut_names)),
+                    year_text,
+                    semester,
+                    ", ".join(lab_tut_types)
+                ]
+                for col, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.subject_table.setItem(self.subject_table.rowCount() - 1, col, item)
+
+            added_keys.add(key)
+
+
 
 
     def deleteSubject(self):
@@ -433,17 +508,25 @@ class TimetableManager(QWidget):
         self.student_count_input = QLineEdit(self)
         self.student_count_input.setPlaceholderText("Total Students")
 
+        self.spec_label = QLabel("specialization :")
+
+        # Specialization dropdown
+        self.spec_dropdown = QComboBox(self)
+        self.spec_dropdown.addItems(["None", "AI", "CS", "DS", "Cloud Computing"])
+
         add_btn = QPushButton("Add Strength", self)
         add_btn.clicked.connect(self.addStrength)
 
         input_layout.addWidget(self.year_input)
         input_layout.addWidget(self.section_input)
         input_layout.addWidget(self.student_count_input)
+        input_layout.addWidget(self.spec_label)
+        input_layout.addWidget(self.spec_dropdown)
         input_layout.addWidget(add_btn)
 
         # Table to display strength data
-        self.strength_table = QTableWidget(0, 3)
-        self.strength_table.setHorizontalHeaderLabels(["Year", "Sections", "Students"])
+        self.strength_table = QTableWidget(0, 4)
+        self.strength_table.setHorizontalHeaderLabels(["Year", "Sections", "Students", "Specialization"])
         self.strength_management_tab.setStyleSheet("""
             QHeaderView::section {
                 border: 1px solid #F5F5F5;
@@ -462,24 +545,34 @@ class TimetableManager(QWidget):
         self.strength_management_tab.setLayout(layout)
         self.loadStrengthData()
 
+
     def addStrength(self):
         """Adds strength data"""
         year = self.year_input.text().strip()
         sections = self.section_input.text().strip()
         students = self.student_count_input.text().strip()
+        specialization = self.spec_dropdown.currentText()
 
         if not year or not sections or not students:
-            QMessageBox.warning(self, "Error", "Please fill all fields!")
+            QMessageBox.warning(self, "Error", "Please fill Year, Sections, and Students fields!")
             return
 
         # Add to database (MongoDB collection)
-        self.strength_collection.insert_one({"year": year, "sections": sections, "students": students})
+        self.strength_collection.insert_one({
+            "year": year,
+            "sections": sections,
+            "students": students,
+            "specialization": None if specialization == "None" else specialization
+        })
 
         QMessageBox.information(self, "Success", f"Strength added for {year} year!")
         self.year_input.clear()
         self.section_input.clear()
         self.student_count_input.clear()
+        self.spec_dropdown.setCurrentIndex(0)
         self.loadStrengthData()
+
+
 
     def loadStrengthData(self):
         """Loads student strength data into the table"""
@@ -498,6 +591,12 @@ class TimetableManager(QWidget):
             student_item = QTableWidgetItem(str(strength["students"]))
             student_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.strength_table.setItem(row, 2, student_item)
+
+            spec_text = str(strength.get("specialization", ""))  # handle None safely
+            spec_item = QTableWidgetItem(spec_text)
+            spec_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.strength_table.setItem(row, 3, spec_item)
+
 
 
     def deleteStrength(self, row):

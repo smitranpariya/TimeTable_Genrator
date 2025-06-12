@@ -6,39 +6,55 @@ import traceback
 
 class TimetableDialog(QDialog):
     timetable_generated = pyqtSignal()  # Signal to indicate timetable generation
-
+    print("initializing dailogbox")
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Select Year and Semester")
+        try:
+            super().__init__(parent)
+            print("initializing init")
+            self.setWindowTitle("Select Year and Semester")
 
-        layout = QVBoxLayout()
+            layout = QVBoxLayout()
 
-        # Year Selection
-        self.year_label = QLabel("Select Year:")
-        self.year_combo = QComboBox()
-        self.year_combo.addItems(["1st Year", "2nd Year", "3rd Year", "4th Year"])
-        layout.addWidget(self.year_label)
-        layout.addWidget(self.year_combo)
+            # Year Selection
+            self.year_label = QLabel("Select Year:")
+            self.year_combo = QComboBox()
+            self.year_combo.addItems(["1st Year", "2nd Year", "3rd Year", "4th Year"])
+            layout.addWidget(self.year_label)
+            layout.addWidget(self.year_combo)
 
-        # Semester Selection (Dynamically Updates)
-        self.sem_label = QLabel("Select Semester:")
-        self.sem_combo = QComboBox()
-        self.update_semesters(0)  # Initialize with first year's semesters
-        layout.addWidget(self.sem_label)
-        layout.addWidget(self.sem_combo)
+            # Semester Selection
+            self.sem_label = QLabel("Select Semester:")
+            self.sem_combo = QComboBox()
+            layout.addWidget(self.sem_label)
+            layout.addWidget(self.sem_combo)
 
-        # Generate Button
-        self.generate_button = QPushButton("Generate Timetable")
-        self.generate_button.clicked.connect(self.generate_timetable)
-        layout.addWidget(self.generate_button)
+            # Specialization Selection
+            self.spec_label = QLabel("Select Specialization:")
+            self.spec_combo = QComboBox()
+            self.spec_combo.addItems(["AI", "CS", "DS", "Cloud Computing"])
+            self.spec_label.hide()
+            self.spec_combo.hide()
+            layout.addWidget(self.spec_label)
+            layout.addWidget(self.spec_combo)
 
-        self.setLayout(layout)
+            # Generate Button
+            self.generate_button = QPushButton("Generate Timetable")
+            self.generate_button.clicked.connect(self.generate_timetable)
+            layout.addWidget(self.generate_button)
 
-        # Connect signals
-        self.year_combo.currentIndexChanged.connect(self.update_semesters)
+            self.setLayout(layout)
+
+            # Now connect the signal
+            self.year_combo.currentIndexChanged.connect(self.update_semesters)
+
+            # Now call update_semesters safely — after all widgets exist
+            self.update_semesters(0)
+        except Exception as e:
+            print(e)
+
 
     def update_semesters(self, index):
-        """Update semester options based on selected year."""
+        """Update semester options and show specialization if needed."""
         year_semesters = {
             0: ["1st Semester", "2nd Semester"],  # 1st Year
             1: ["3rd Semester", "4th Semester"],  # 2nd Year
@@ -49,8 +65,17 @@ class TimetableDialog(QDialog):
         self.sem_combo.clear()
         self.sem_combo.addItems(year_semesters.get(index, []))
 
+        # Show specialization for 3rd (index 2) and 4th (index 3) year
+        if index in (2, 3):
+            self.spec_label.show()
+            self.spec_combo.show()
+        else:
+            self.spec_label.hide()
+            self.spec_combo.hide()
+
+
     def get_selected_year_sem(self):
-        """Return selected year and semester in integer format"""
+        """Return selected year, semester, and specialization (if applicable)"""
         year_mapping = {
             "1st Year": 1,
             "2nd Year": 2,
@@ -71,14 +96,18 @@ class TimetableDialog(QDialog):
 
         selected_year = year_mapping[self.year_combo.currentText()]
         selected_sem = sem_mapping[self.sem_combo.currentText()]
-        return selected_year, selected_sem
 
+        # Check if specialization is visible, if so return it, else None
+        selected_spec = self.spec_combo.currentText() if self.spec_combo.isVisible() else None
+
+        return selected_year, selected_sem , selected_spec
+    
     def generate_timetable(self):
         """Trigger timetable generation when button is clicked"""
-        year, semester = self.get_selected_year_sem()  # Get year & semester as integers
+        year, semester, selected_spec = self.get_selected_year_sem()  # Get year & semester as integers
 
         try:
-            generator = TimetableGenerator(year, semester)
+            generator = TimetableGenerator(year, semester , selected_spec)
             timetable = generator.generate_timetable()  # Store generated timetable
 
             if timetable:
@@ -101,9 +130,11 @@ class TimetableDialog(QDialog):
 
 class TimetableGenerator:
 
-    def __init__(self, year, semester):
+    def __init__(self, year, semester ,specialization=None):
         self.year = year
         self.semester = semester
+        self.specialization = specialization
+        print(f"Generator initialized with Year: {year}, Semester: {semester}, Specialization: {specialization}")
         self.client = pymongo.MongoClient("mongodb://localhost:27017/")
         self.db = self.client["timetable_db"]
         self.timetable = {}
@@ -114,50 +145,40 @@ class TimetableGenerator:
             self.rooms = list(self.db["rooms"].find())
             self.labs = list(self.db["labs"].find())
 
-            # Convert year to match DB format (e.g., "1st Year" instead of "1 Year")
+            # Map year to match DB format
             year_map = {
                 "1": "1st Year",
                 "2": "2nd Year",
                 "3": "3rd Year",
                 "4": "4th Year"
             }
-            year_str = year_map.get(str(self.year), f"{self.year} Year")  # Handle unexpected input
+            year_str = year_map.get(str(self.year), f"{self.year} Year")
 
-            # Convert semester (should be correct as "Semester 1", "Semester 2", etc.)
-            semester_str = f"Semester {self.semester}"
+            # Convert semester value to DB format if needed
+            semester_str = f"Semester {self.semester}"  # Match "Semester 1" style
 
-            # Fetch subjects (subjects now contain faculty details)
-            self.subjects = list(self.db["Subject_collection"].find({"year": year_str, "semester": semester_str}))
+            # Build query
+            query = {"year": year_str, "semester": semester_str}
+            if self.specialization:  # Only add if not empty
+                query["specialization"] = self.specialization
 
-            # Error handling
+            print(f"Fetching subjects with query: {query}")
+
+            self.subjects = list(self.db["Subject_collection"].find(query))
+
             if not self.subjects:
-                raise ValueError(f"No subjects found for {year_str} - {semester_str}.")
+                raise ValueError(f"No subjects found for {year_str} - {semester_str} with specialization {self.specialization or 'None'}.")
+
             if not self.rooms:
                 raise ValueError("No rooms found in the database.")
 
         except Exception as e:
             print(f"Error fetching data: {e}")
-            return False  # Indicate failure
-        
-        return True  # Indicate success
+            return False
 
-    def assign_subjects(self):
-        """Assign subjects including Theory and Lab, ensuring unique storage in a MongoDB-friendly format."""
-        try:
-            semester_key = str(self.semester)  # Convert semester to string
-            self.timetable[semester_key] = []  # Use string key for MongoDB
-            
-            for subject in self.subjects:
-                self.timetable[semester_key].append({
-                    "subject": subject["subject"],
-                    "type": subject["type"],  # Store Theory/Lab distinction
-                    "faculty": subject["faculty"]  # Store faculty from Subject_collection
-                })
+        return True
 
-            print(f"Subjects assigned successfully for Semester {self.semester}")
 
-        except Exception as e:
-            print(f"Error assigning subjects: {e}")
 
     def generate_timetable(self):
         """Generate and save the timetable ensuring no faculty conflicts between batches."""
