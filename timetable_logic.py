@@ -130,7 +130,7 @@ class TimetableDialog(QDialog):
 
 class TimetableGenerator:
 
-    def __init__(self, year, semester ,specialization=None):
+    def __init__(self, year, semester, specialization=None):
         self.year = year
         self.semester = semester
         self.specialization = specialization
@@ -159,12 +159,15 @@ class TimetableGenerator:
 
             # Build query
             query = {"year": year_str, "semester": semester_str}
-            if self.specialization:  # Only add if not empty
+            if self.specialization and self.specialization != "None":  # Only add if specialization is provided and not "None"
                 query["specialization"] = self.specialization
 
             print(f"Fetching subjects with query: {query}")
 
             self.subjects = list(self.db["Subject_collection"].find(query))
+
+            # Debug: Print fetched subjects to verify
+            print(f"Fetched subjects: {[sub for sub in self.subjects]}")
 
             if not self.subjects:
                 raise ValueError(f"No subjects found for {year_str} - {semester_str} with specialization {self.specialization or 'None'}.")
@@ -178,21 +181,31 @@ class TimetableGenerator:
 
         return True
 
-
-
     def generate_timetable(self):
         """Generate and save the timetable ensuring no faculty conflicts between batches."""
         if not self.fetch_data():
             print("Failed to generate timetable due to missing data.")
             return None
 
-        strength_info = self.db["strength_details"].find_one({"year": str(self.year)})
+        # Fetch strength details for the given year and specialization
+        strength_query = {"year": str(self.year)}
+        if self.year in [3, 4] and self.specialization and self.specialization != "None":
+            strength_query["specialization"] = self.specialization
+        else:
+            strength_query["specialization"] = None  # For 1st and 2nd years, specialization is null
 
-        if not strength_info or "sections" not in strength_info:
-            print(f"No section details found for year {self.year}.")
+        print(f"Fetching strength details with query: {strength_query}")
+        strength_info = self.db["strength_details"].find_one(strength_query)
+
+        if not strength_info:
+            print(f"No section details found for year {self.year}, specialization {self.specialization or 'None'}.")
             return None
 
+        print(f"Strength info fetched: {strength_info}")
+
         num_batches = int(strength_info["sections"])
+        total_students = int(strength_info["students"])
+        batch_strength = round(total_students / num_batches)
 
         time_slots = [
             "9:30 - 10:30", "10:30 - 11:30", "11:30 - 12:30",
@@ -202,117 +215,241 @@ class TimetableGenerator:
         days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
         global_faculty_schedule = {day: {slot: None for slot in time_slots} for day in days}
-
         timetables = []
 
-        for batch in range(1, num_batches + 1):
-            weekly_schedule = {day: {slot: None for slot in time_slots} for day in days}
+        # If year is 3rd or 4th, use the specialization
+        if self.year in [3, 4] and self.specialization and self.specialization != "None":
+            spec = self.specialization
 
-            lab_subjects = [sub for sub in self.subjects if sub["type"] == "Lab"]
-            assigned_labs = set()
+            for batch in range(1, num_batches + 1):
+                weekly_schedule = {day: {slot: None for slot in time_slots} for day in days}
 
-            # Ensure all labs are assigned
-            for lab in lab_subjects:
-                assigned = False
-                attempts = 0
-                while not assigned and attempts < 100:  # Further increase attempts
-                    day = random.choice(days)
-                    slot_index = random.randint(0, len(time_slots) - 2)
+                lab_subjects = [sub for sub in self.subjects if sub["type"] == "Lab"]
+                assigned_labs = set()
 
-                    if (slot_index != 2 and
-                        not weekly_schedule[day][time_slots[slot_index]] and 
-                        not weekly_schedule[day][time_slots[slot_index + 1]] and
-                        not global_faculty_schedule[day][time_slots[slot_index]] and
-                        not global_faculty_schedule[day][time_slots[slot_index + 1]] and
-                        lab["subject"] not in assigned_labs and
-                        not any(s and s.get("type") == "Lab" for s in weekly_schedule[day].values())):
-                        
-                        weekly_schedule[day][time_slots[slot_index]] = {"subject": lab["subject"], "type": "Lab"}
-                        weekly_schedule[day][time_slots[slot_index + 1]] = {"subject": lab["subject"], "type": "Lab"}
-                        
-                        global_faculty_schedule[day][time_slots[slot_index]] = lab["subject"]
-                        global_faculty_schedule[day][time_slots[slot_index + 1]] = lab["subject"]
-                        
-                        assigned_labs.add(lab["subject"])
-                        assigned = True
-                    attempts += 1
+                # Ensure all labs are assigned
+                for lab in lab_subjects:
+                    assigned = False
+                    attempts = 0
+                    while not assigned and attempts < 100:
+                        day = random.choice(days)
+                        slot_index = random.randint(0, len(time_slots) - 2)
 
-                if not assigned:
-                    print(f"Warning: Could not assign lab {lab['subject']} for batch {batch}.")
+                        if (slot_index != 2 and
+                            not weekly_schedule[day][time_slots[slot_index]] and 
+                            not weekly_schedule[day][time_slots[slot_index + 1]] and
+                            not global_faculty_schedule[day][time_slots[slot_index]] and
+                            not global_faculty_schedule[day][time_slots[slot_index + 1]] and
+                            lab["subject"] not in assigned_labs and
+                            not any(s and s.get("type") == "Lab" for s in weekly_schedule[day].values())):
+                            
+                            weekly_schedule[day][time_slots[slot_index]] = {"subject": lab["subject"], "type": "Lab"}
+                            weekly_schedule[day][time_slots[slot_index + 1]] = {"subject": lab["subject"], "type": "Lab"}
+                            
+                            global_faculty_schedule[day][time_slots[slot_index]] = f"{lab['subject']}_{spec}_{batch}"
+                            global_faculty_schedule[day][time_slots[slot_index + 1]] = f"{lab['subject']}_{spec}_{batch}"
+                            
+                            assigned_labs.add(lab["subject"])
+                            assigned = True
+                        attempts += 1
 
-            tutorial_subjects = [sub for sub in self.subjects if sub["type"] == "Tutorial"]
+                    if not assigned:
+                        print(f"Warning: Could not assign lab {lab['subject']} for batch {batch}, specialization {spec}.")
 
-            # Ensure all tutorials are assigned
-            for tutorial in tutorial_subjects:
-                assigned = False
-                attempts = 0
-                while not assigned and attempts < 100:  # Further increase attempts
-                    day = random.choice(days)
-                    slot = random.choice(time_slots)
-                    if not weekly_schedule[day][slot] and not global_faculty_schedule[day][slot]:
-                        weekly_schedule[day][slot] = {"subject": tutorial["subject"], "type": "Tutorial"}
-                        global_faculty_schedule[day][slot] = tutorial["subject"]
-                        assigned = True
-                    attempts += 1
+                tutorial_subjects = [sub for sub in self.subjects if sub["type"] == "Tutorial"]
 
-                if not assigned:
-                    print(f"Warning: Could not assign tutorial {tutorial['subject']} for batch {batch}.")
+                # Ensure all tutorials are assigned
+                for tutorial in tutorial_subjects:
+                    assigned = False
+                    attempts = 0
+                    while not assigned and attempts < 100:
+                        day = random.choice(days)
+                        slot = random.choice(time_slots)
+                        if not weekly_schedule[day][slot] and not global_faculty_schedule[day][slot]:
+                            weekly_schedule[day][slot] = {"subject": tutorial["subject"], "type": "Tutorial"}
+                            global_faculty_schedule[day][slot] = f"{tutorial['subject']}_{spec}_{batch}"
+                            assigned = True
+                        attempts += 1
 
-            theory_subjects = [sub for sub in self.subjects if sub["type"] == "Theory"]
-            subject_counts = {sub["subject"]: 0 for sub in theory_subjects}
+                    if not assigned:
+                        print(f"Warning: Could not assign tutorial {tutorial['subject']} for batch {batch}, specialization {spec}.")
 
-            for day in days:
-                lecture_count = 0
-                for slot_index, slot in enumerate(time_slots):
-                    if not weekly_schedule[day][slot]:
-                        available_subjects = [
-                            sub for sub in theory_subjects 
-                            if subject_counts[sub["subject"]] < 3 and 
-                            global_faculty_schedule[day][slot] != sub["subject"] and
-                            sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s] and
-                            (slot_index == 0 or global_faculty_schedule[day][time_slots[slot_index - 1]] != sub["subject"]) and
-                            (slot_index == len(time_slots) - 1 or global_faculty_schedule[day][time_slots[slot_index + 1]] != sub["subject"]) and
-                            sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s and s["type"] == "Theory"]
-                        ]
-                        
-                        if available_subjects and lecture_count < 3:
-                            subject = random.choice(available_subjects)
-                            weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
-                            subject_counts[subject["subject"]] += 1
-                            lecture_count += 1
+                theory_subjects = [sub for sub in self.subjects if sub["type"] == "Theory"]
+                subject_counts = {sub["subject"]: 0 for sub in theory_subjects}
 
-                            global_faculty_schedule[day][slot] = subject["subject"]
-                        elif lecture_count >= 3:
-                            weekly_schedule[day][slot] = {"subject": "Office Hour", "type": "Office"}
+                for day in days:
+                    lecture_count = 0
+                    for slot_index, slot in enumerate(time_slots):
+                        if not weekly_schedule[day][slot]:
+                            available_subjects = [
+                                sub for sub in theory_subjects 
+                                if subject_counts[sub["subject"]] < 3 and 
+                                global_faculty_schedule[day][slot] != f"{sub['subject']}_{spec}_{batch}" and
+                                sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s] and
+                                (slot_index == 0 or global_faculty_schedule[day][time_slots[slot_index - 1]] != f"{sub['subject']}_{spec}_{batch}") and
+                                (slot_index == len(time_slots) - 1 or global_faculty_schedule[day][time_slots[slot_index + 1]] != f"{sub['subject']}_{spec}_{batch}") and
+                                sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s and s["type"] == "Theory"]
+                            ]
+                            
+                            if available_subjects and lecture_count < 3:
+                                subject = random.choice(available_subjects)
+                                weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
+                                subject_counts[subject["subject"]] += 1
+                                lecture_count += 1
 
-                if lecture_count < 3:
-                    print(f"Warning: Less than 3 lectures assigned on {day} for batch {batch}.")
+                                global_faculty_schedule[day][slot] = f"{subject['subject']}_{spec}_{batch}"
+                            elif lecture_count >= 3:
+                                weekly_schedule[day][slot] = {"subject": "Office Hour", "type": "Office"}
 
-            # Ensure at least one lecture per day
-            for day in days:
-                if all(slot is None for slot in weekly_schedule[day].values()):
-                    slot = random.choice(time_slots)
-                    subject = random.choice(theory_subjects)
-                    weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
-                    subject_counts[subject["subject"]] += 1
+                    if lecture_count < 3:
+                        print(f"Warning: Less than 3 lectures assigned on {day} for batch {batch}, specialization {spec}.")
 
-            # Fill remaining slots with unassigned subjects, prioritizing after lunch
-            for day in days:
-                for slot in time_slots[3:]:  # Start filling from after lunch
-                    if not weekly_schedule[day][slot]:
-                        for sub in theory_subjects:
-                            if subject_counts[sub["subject"]] < 3:
-                                weekly_schedule[day][slot] = {"subject": sub["subject"], "type": "Theory"}
-                                subject_counts[sub["subject"]] += 1
-                                break
+                # Ensure at least one lecture per day
+                for day in days:
+                    if all(slot is None for slot in weekly_schedule[day].values()):
+                        slot = random.choice(time_slots)
+                        subject = random.choice(theory_subjects)
+                        weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
+                        subject_counts[subject["subject"]] += 1
 
-            batch_timetable = {
-                "year": self.year,
-                "semester": self.semester,
-                "batch": batch,
-                "data": weekly_schedule
-            }
-            timetables.append(batch_timetable)
+                # Fill remaining slots with unassigned subjects, prioritizing after lunch
+                for day in days:
+                    for slot in time_slots[3:]:
+                        if not weekly_schedule[day][slot]:
+                            for sub in theory_subjects:
+                                if subject_counts[sub["subject"]] < 3:
+                                    weekly_schedule[day][slot] = {"subject": sub["subject"], "type": "Theory"}
+                                    subject_counts[sub["subject"]] += 1
+                                    break
+
+                batch_timetable = {
+                    "year": self.year,
+                    "semester": self.semester,
+                    "batch": batch,
+                    "specialization": spec,
+                    "total_students": total_students,
+                    "batch_strength": batch_strength,
+                    "data": weekly_schedule
+                }
+                timetables.append(batch_timetable)
+
+        else:
+            # For 1st and 2nd years, proceed as before
+            num_batches = int(strength_info["sections"])
+            total_students = int(strength_info["students"])
+            batch_strength = round(total_students / num_batches)
+
+            for batch in range(1, num_batches + 1):
+                weekly_schedule = {day: {slot: None for slot in time_slots} for day in days}
+
+                lab_subjects = [sub for sub in self.subjects if sub["type"] == "Lab"]
+                assigned_labs = set()
+
+                # Ensure all labs are assigned
+                for lab in lab_subjects:
+                    assigned = False
+                    attempts = 0
+                    while not assigned and attempts < 100:
+                        day = random.choice(days)
+                        slot_index = random.randint(0, len(time_slots) - 2)
+
+                        if (slot_index != 2 and
+                            not weekly_schedule[day][time_slots[slot_index]] and 
+                            not weekly_schedule[day][time_slots[slot_index + 1]] and
+                            not global_faculty_schedule[day][time_slots[slot_index]] and
+                            not global_faculty_schedule[day][time_slots[slot_index + 1]] and
+                            lab["subject"] not in assigned_labs and
+                            not any(s and s.get("type") == "Lab" for s in weekly_schedule[day].values())):
+                            
+                            weekly_schedule[day][time_slots[slot_index]] = {"subject": lab["subject"], "type": "Lab"}
+                            weekly_schedule[day][time_slots[slot_index + 1]] = {"subject": lab["subject"], "type": "Lab"}
+                            
+                            global_faculty_schedule[day][time_slots[slot_index]] = lab["subject"]
+                            global_faculty_schedule[day][time_slots[slot_index + 1]] = lab["subject"]
+                            
+                            assigned_labs.add(lab["subject"])
+                            assigned = True
+                        attempts += 1
+
+                    if not assigned:
+                        print(f"Warning: Could not assign lab {lab['subject']} for batch {batch}.")
+
+                tutorial_subjects = [sub for sub in self.subjects if sub["type"] == "Tutorial"]
+
+                # Ensure all tutorials are assigned
+                for tutorial in tutorial_subjects:
+                    assigned = False
+                    attempts = 0
+                    while not assigned and attempts < 100:
+                        day = random.choice(days)
+                        slot = random.choice(time_slots)
+                        if not weekly_schedule[day][slot] and not global_faculty_schedule[day][slot]:
+                            weekly_schedule[day][slot] = {"subject": tutorial["subject"], "type": "Tutorial"}
+                            global_faculty_schedule[day][slot] = tutorial["subject"]
+                            assigned = True
+                        attempts += 1
+
+                    if not assigned:
+                        print(f"Warning: Could not assign tutorial {tutorial['subject']} for batch {batch}.")
+
+                theory_subjects = [sub for sub in self.subjects if sub["type"] == "Theory"]
+                subject_counts = {sub["subject"]: 0 for sub in theory_subjects}
+
+                for day in days:
+                    lecture_count = 0
+                    for slot_index, slot in enumerate(time_slots):
+                        if not weekly_schedule[day][slot]:
+                            available_subjects = [
+                                sub for sub in theory_subjects 
+                                if subject_counts[sub["subject"]] < 3 and 
+                                global_faculty_schedule[day][slot] != sub["subject"] and
+                                sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s] and
+                                (slot_index == 0 or global_faculty_schedule[day][time_slots[slot_index - 1]] != sub["subject"]) and
+                                (slot_index == len(time_slots) - 1 or global_faculty_schedule[day][time_slots[slot_index + 1]] != sub["subject"]) and
+                                sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s and s["type"] == "Theory"]
+                            ]
+                            
+                            if available_subjects and lecture_count < 3:
+                                subject = random.choice(available_subjects)
+                                weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
+                                subject_counts[subject["subject"]] += 1
+                                lecture_count += 1
+
+                                global_faculty_schedule[day][slot] = subject["subject"]
+                            elif lecture_count >= 3:
+                                weekly_schedule[day][slot] = {"subject": "Office Hour", "type": "Office"}
+
+                    if lecture_count < 3:
+                        print(f"Warning: Less than 3 lectures assigned on {day} for batch {batch}.")
+
+                # Ensure at least one lecture per day
+                for day in days:
+                    if all(slot is None for slot in weekly_schedule[day].values()):
+                        slot = random.choice(time_slots)
+                        subject = random.choice(theory_subjects)
+                        weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
+                        subject_counts[subject["subject"]] += 1
+
+                # Fill remaining slots with unassigned subjects, prioritizing after lunch
+                for day in days:
+                    for slot in time_slots[3:]:
+                        if not weekly_schedule[day][slot]:
+                            for sub in theory_subjects:
+                                if subject_counts[sub["subject"]] < 3:
+                                    weekly_schedule[day][slot] = {"subject": sub["subject"], "type": "Theory"}
+                                    subject_counts[sub["subject"]] += 1
+                                    break
+
+                batch_timetable = {
+                    "year": self.year,
+                    "semester": self.semester,
+                    "batch": batch,
+                    "specialization": "None",
+                    "total_students": total_students,
+                    "batch_strength": batch_strength,
+                    "data": weekly_schedule
+                }
+                timetables.append(batch_timetable)
 
         # Assign rooms and labs to the generated timetable
         self.assign_rooms_and_labs(timetables)
@@ -321,7 +458,7 @@ class TimetableGenerator:
         try:
             for timetable in timetables:
                 self.db["timetable"].update_one(
-                    {"year": timetable["year"], "semester": timetable["semester"], "batch": timetable["batch"]},
+                    {"year": timetable["year"], "semester": timetable["semester"], "batch": timetable["batch"], "specialization": timetable["specialization"]},
                     {"$set": timetable},
                     upsert=True
                 )
@@ -345,21 +482,14 @@ class TimetableGenerator:
         rooms = list(self.db["rooms"].find())
         labs = list(self.db["labs"].find())
 
-        # Fetch strength details
-        strength_info = self.db["strength_details"].find_one({"year": str(self.year)})
-        if not strength_info:
-            print(f"No strength details found for year {self.year}.")
-            return None
-
-        total_strength = strength_info.get("total_strength", 0)
-        num_batches = int(strength_info["sections"])
-        batch_strength = round(total_strength / num_batches)
-
-        # Initialize or fetch occupancy tracking
+        # Initialize occupancy tracking
         occupancy_collection = self.db["room_lab_occupancy"]
         occupancy = occupancy_collection.find_one() or {day: {slot: {"rooms": [], "labs": []} for slot in time_slots} for day in days}
 
         for timetable in timetables:
+            # Use the pre-calculated batch strength from the timetable
+            batch_strength = timetable["batch_strength"]
+
             for day, slots in timetable["data"].items():
                 for slot_index, slot in enumerate(time_slots):
                     session = slots.get(slot)

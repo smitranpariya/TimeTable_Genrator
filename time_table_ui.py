@@ -2,18 +2,18 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QLabel,
     QDialog, QComboBox, QPushButton, QHBoxLayout, QMessageBox, QFileDialog
 )
-from PyQt6.QtGui import QFont, QColor, QBrush, QPixmap, QPainter,QPageSize,QPageLayout
-from PyQt6.QtCore import Qt,QMarginsF
+from PyQt6.QtGui import QFont, QColor, QBrush, QPixmap, QPainter, QPageSize, QPageLayout
+from PyQt6.QtCore import Qt, QMarginsF
 from PyQt6.QtPrintSupport import QPrinter
 import sys
 import pymongo
 
 class TimetableSelectionDialog(QDialog):
-    """Dialog to select batch, year, and semester before showing the timetable"""
+    """Dialog to select batch, year, semester, and specialization before showing the timetable"""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Select Timetable")
-        self.setGeometry(300, 200, 350, 200)
+        self.setGeometry(300, 200, 350, 250)
 
         layout = QVBoxLayout()
 
@@ -26,7 +26,7 @@ class TimetableSelectionDialog(QDialog):
         # Year selection
         self.year_combo = QComboBox()
         self.year_combo.addItems(["First", "Second", "Third", "Final"])
-        self.year_combo.currentIndexChanged.connect(self.update_semester_options)
+        self.year_combo.currentIndexChanged.connect(self.update_semester_and_specialization_options)
         layout.addWidget(QLabel("Select Year:"))
         layout.addWidget(self.year_combo)
 
@@ -35,14 +35,25 @@ class TimetableSelectionDialog(QDialog):
         layout.addWidget(QLabel("Select Semester:"))
         layout.addWidget(self.semester_combo)
 
-        self.update_semester_options()  # Initialize semester options
+        # Specialization selection (visible only for 3rd and 4th years)
+        self.specialization_label = QLabel("Select Specialization:")
+        self.specialization_combo = QComboBox()
+        self.specialization_combo.addItems(["AI", "CS", "DS", "Cloud Computing"])
+        layout.addWidget(self.specialization_label)
+        layout.addWidget(self.specialization_combo)
+
+        # Initially hide specialization options (will show for 3rd and 4th years)
+        self.specialization_label.setVisible(False)
+        self.specialization_combo.setVisible(False)
+
+        self.update_semester_and_specialization_options()  # Initialize semester and specialization options
 
         # Buttons
         button_layout = QHBoxLayout()
         self.ok_button = QPushButton("OK")
         self.ok_button.clicked.connect(self.accept)  # Ensure OK button closes the dialog
 
-        self.cancel_button = QPushButton("Cancel")  # **Fixed: Defined cancel button**
+        self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
 
         button_layout.addWidget(self.ok_button)
@@ -51,38 +62,59 @@ class TimetableSelectionDialog(QDialog):
 
         self.setLayout(layout)
 
-    def update_semester_options(self):
-        """Update semester dropdown based on selected year"""
+    def update_semester_and_specialization_options(self):
+        """Update semester and specialization dropdowns based on selected year"""
         self.semester_combo.clear()
         year_index = self.year_combo.currentIndex()
         start_semester = year_index * 2 + 1
         self.semester_combo.addItems([str(start_semester), str(start_semester + 1)])
 
+        # Show specialization dropdown only for 3rd and 4th years
+        if year_index in [2, 3]:  # Third or Final year
+            self.specialization_label.setVisible(True)
+            self.specialization_combo.setVisible(True)
+        else:
+            self.specialization_label.setVisible(False)
+            self.specialization_combo.setVisible(False)
+
     def get_selection(self):
-        """Returns selected batch, year, and semester"""
+        """Returns selected batch, year, semester, and specialization"""
         batch = int(self.batch_combo.currentText())  # Convert to integer (1 or 2)
         year = self.year_combo.currentText()
         semester = int(self.semester_combo.currentText())  # Convert to integer (1-8)
-        return batch, year, semester
+        # Only include specialization for 3rd and 4th years
+        if self.year_combo.currentIndex() in [2, 3]:
+            specialization = self.specialization_combo.currentText()
+        else:
+            specialization = "None"
+        return batch, year, semester, specialization
 
 
 class Timetable(QWidget):
     """Main timetable display window"""
 
-    def __init__(self, batch, year, semester):
+    def __init__(self, batch, year, semester, specialization):
         super().__init__()
 
         self.batch = batch
         self.year = year
         self.semester = semester
+        self.specialization = specialization
 
-        self.setWindowTitle(f"Timetable for Batch {batch}, {year} Year - Semester {semester}")
-        self.setGeometry(100, 100, 1400,800)
+        # Update window title to include specialization for 3rd and 4th years
+        if self.specialization != "None":
+            self.setWindowTitle(f"Timetable for Batch {batch}, {year} Year - Semester {semester} ({specialization})")
+        else:
+            self.setWindowTitle(f"Timetable for Batch {batch}, {year} Year - Semester {semester}")
+        self.setGeometry(100, 100, 1400, 800)
 
         layout = QVBoxLayout()
 
         # Title
-        title = QLabel(f"Timetable for Batch {batch}, {year} Year - Semester {semester}")
+        if self.specialization != "None":
+            title = QLabel(f"Timetable for Batch {batch}, {year} Year - Semester {semester} ({specialization})")
+        else:
+            title = QLabel(f"Timetable for Batch {batch}, {year} Year - Semester {semester}")
         title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
@@ -148,18 +180,26 @@ class Timetable(QWidget):
             db = client["timetable_db"]
             collection = db["timetable"]
 
-            YEAR_MAPPING = {"First": 1, "Second": 2, "Third": 3, "Fourth": 4}
+            YEAR_MAPPING = {"First": 1, "Second": 2, "Third": 3, "Final": 4}
             SEMESTER_MAPPING = {str(i): i for i in range(1, 9)}
 
             year = YEAR_MAPPING.get(self.year, self.year)  
-            semester = SEMESTER_MAPPING.get(self.semester, self.semester)
+            semester = SEMESTER_MAPPING.get(str(self.semester), self.semester)
             batch = int(self.batch)  
 
+            # Include specialization in the query for 3rd and 4th years
             query = {"year": year, "semester": semester, "batch": batch}
+            if self.specialization != "None":
+                query["specialization"] = self.specialization
+            else:
+                query["specialization"] = "None"
+
+            print(f"Fetching timetable with query: {query}")
             timetable_data = collection.find_one(query)
 
             if not timetable_data:
-                print(f"No timetable found for Year {year}, Semester {semester}, Batch {batch}")
+                print(f"No timetable found for Year {year}, Semester {semester}, Batch {batch}, Specialization {self.specialization}")
+                QMessageBox.warning(self, "No Data", f"No timetable found for Batch {batch}, {self.year} Year - Semester {semester}, Specialization {self.specialization}")
                 return
 
             data = timetable_data.get("data", {})
@@ -198,6 +238,7 @@ class Timetable(QWidget):
 
         except Exception as e:
             print("Error fetching timetable:", str(e))
+            QMessageBox.critical(self, "Error", f"Error fetching timetable: {str(e)}")
 
     def get_day_column(self, day):
         days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -242,8 +283,8 @@ if __name__ == "__main__":
 
     selection_dialog = TimetableSelectionDialog()
     if selection_dialog.exec():
-        batch, year, semester = selection_dialog.get_selection()
-        timetable_window = Timetable(batch, year, semester)
+        batch, year, semester, specialization = selection_dialog.get_selection()
+        timetable_window = Timetable(batch, year, semester, specialization)
         timetable_window.show()
 
     sys.exit(app.exec())
