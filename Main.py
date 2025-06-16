@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QMainWindow,
     QLineEdit, QTableWidget, QTableWidgetItem, QTabWidget, 
-    QMessageBox, QHeaderView, QHBoxLayout, QComboBox, QRadioButton, QMenuBar, QGridLayout, QFrame, QSizePolicy, QCheckBox
+    QMessageBox, QHeaderView, QHBoxLayout, QComboBox, QRadioButton, QMenuBar, QGridLayout, QFrame, QSizePolicy, QCheckBox,QAbstractItemView,QMenu,QDialog
 )
 from PyQt6.QtGui import QFont, QColor, QPalette, QIntValidator, QAction
 from PyQt6.QtCore import Qt, QProcess, pyqtSignal
@@ -479,11 +479,238 @@ class TimetableManager(QWidget):
         """)
         self.subject_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
+        # Enable context menu for right-click
+        self.subject_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.subject_table.customContextMenuRequested.connect(self.showContextMenu)
+
         layout.addLayout(input_layout)
         layout.addWidget(self.subject_table)
 
         self.subject_tab.setLayout(layout)
         self.loadSubjects()
+
+    def showContextMenu(self, pos):
+        """Show context menu with Edit and Delete options on right-click"""
+        row = self.subject_table.currentRow()
+        if row == -1:
+            return
+
+        menu = QMenu(self)
+
+        edit_action = QAction("Edit", self)
+        edit_action.triggered.connect(self.editSubject)
+        menu.addAction(edit_action)
+
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(self.deleteSubject)
+        menu.addAction(delete_action)
+
+        menu.exec(self.subject_table.mapToGlobal(pos))
+
+    def editSubject(self):
+        """Open a dialog to edit the selected subject"""
+        row = self.subject_table.currentRow()
+        if row == -1:
+            QMessageBox.warning(self, "Error", "Please select a subject to edit.")
+            return
+
+        # Gather subject data
+        subject_name = self.subject_table.item(row, 0).text()
+        assigned_to = self.subject_table.item(row, 1).text()
+        year_text = self.subject_table.item(row, 2).text()
+        semester = self.subject_table.item(row, 3).text()
+        types_str = self.subject_table.item(row, 4).text()
+
+        # Extract year and specialization from year_text
+        year = year_text
+        specialization = ""
+        if "(" in year_text:
+            year, specialization = year_text.split(" (")
+            specialization = specialization.rstrip(")")
+            year = year.strip()
+
+        # Fetch all types for this subject
+        types_cursor = self.subject_collection.find({
+            "subject": subject_name,
+            "year": year,
+            "semester": semester,
+            "specialization": specialization
+        })
+
+        theory_types = []
+        lab_tut_types = []
+        faculty = ""
+        ta = ""
+
+        for sub in types_cursor:
+            if sub["type"] == "Theory":
+                theory_types.append("Theory")
+                faculty = sub.get("faculty", "")
+            else:
+                lab_tut_types.append(sub["type"])
+                ta = sub.get("ta", "")
+
+        # Create dialog for editing
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Subject")
+        dialog.setGeometry(300, 200, 400, 400)
+
+        layout = QVBoxLayout()
+
+        # Subject Name
+        layout.addWidget(QLabel("Subject Name:"))
+        subject_input = QLineEdit(subject_name)
+        layout.addWidget(subject_input)
+
+        # Faculty Name
+        layout.addWidget(QLabel("Faculty Name (for Theory):"))
+        faculty_input = QLineEdit(faculty)
+        layout.addWidget(faculty_input)
+
+        # TA Name
+        layout.addWidget(QLabel("TA Name (for Lab/Tutorial):"))
+        ta_input = QLineEdit(ta)
+        layout.addWidget(ta_input)
+
+        # Year
+        layout.addWidget(QLabel("Year:"))
+        year_dropdown = QComboBox()
+        year_dropdown.addItems(self.year_semester_map.keys())
+        year_dropdown.setCurrentText(year)
+        layout.addWidget(year_dropdown)
+
+        # Specialization (for 3rd and 4th years)
+        layout.addWidget(QLabel("Specialization:"))
+        specialization_dropdown = QComboBox()
+        specialization_dropdown.addItems(["AI", "CS", "DS", "Cloud Computing"])
+        if specialization:
+            specialization_dropdown.setCurrentText(specialization)
+        specialization_dropdown.setVisible(year in ["3rd Year", "4th Year"])
+
+        # Update specialization visibility when year changes
+        def updateSpecializationVisibility(selected_year):
+            specialization_dropdown.setVisible(selected_year in ["3rd Year", "4th Year"])
+
+        year_dropdown.currentTextChanged.connect(updateSpecializationVisibility)
+        layout.addWidget(specialization_dropdown)
+
+        # Semester
+        layout.addWidget(QLabel("Semester:"))
+        semester_dropdown = QComboBox()
+        semester_dropdown.addItems(self.year_semester_map[year])
+        semester_dropdown.setCurrentText(semester)
+
+        # Update semesters when year changes
+        def updateSemesterDropdown(selected_year):
+            semesters = self.year_semester_map.get(selected_year, [])
+            semester_dropdown.clear()
+            semester_dropdown.addItems(semesters)
+
+        year_dropdown.currentTextChanged.connect(updateSemesterDropdown)
+        layout.addWidget(semester_dropdown)
+
+        # Types
+        layout.addWidget(QLabel("Subject Types:"))
+        theory_checkbox = QCheckBox("Theory")
+        lab_checkbox = QCheckBox("Lab")
+        tutorial_checkbox = QCheckBox("Tutorial")
+        theory_checkbox.setChecked("Theory" in types_str)
+        lab_checkbox.setChecked("Lab" in types_str)
+        tutorial_checkbox.setChecked("Tutorial" in types_str)
+        layout.addWidget(theory_checkbox)
+        layout.addWidget(lab_checkbox)
+        layout.addWidget(tutorial_checkbox)
+
+        # Update Button
+        update_btn = QPushButton("Update")
+        def updateAction():
+            new_subject = subject_input.text().strip()
+            new_faculty = faculty_input.text().strip()
+            new_ta = ta_input.text().strip()
+            new_year = year_dropdown.currentText()
+            new_semester = semester_dropdown.currentText()
+            new_specialization = specialization_dropdown.currentText() if specialization_dropdown.isVisible() else ""
+
+            new_types = []
+            if theory_checkbox.isChecked():
+                new_types.append("Theory")
+            if lab_checkbox.isChecked():
+                new_types.append("Lab")
+            if tutorial_checkbox.isChecked():
+                new_types.append("Tutorial")
+
+            # Validation
+            if not new_subject:
+                QMessageBox.warning(dialog, "Error", "Please enter a subject name.")
+                return
+
+            if not new_types:
+                QMessageBox.warning(dialog, "Error", "Please select at least one type (Theory/Lab/Tutorial).")
+                return
+
+            if "Theory" in new_types and not new_faculty:
+                QMessageBox.warning(dialog, "Error", "Faculty name is mandatory for Theory subjects.")
+                return
+
+            if ("Lab" in new_types or "Tutorial" in new_types) and not new_ta:
+                QMessageBox.warning(dialog, "Error", "TA name is mandatory for Lab/Tutorial subjects.")
+                return
+
+            # Delete old entries
+            self.subject_collection.delete_many({
+                "subject": subject_name,
+                "year": year,
+                "semester": semester,
+                "specialization": specialization
+            })
+
+            # Insert updated entries
+            inserted_count = 0
+            for t in new_types:
+                existing_subject = self.subject_collection.find_one({
+                    "subject": new_subject,
+                    "year": new_year,
+                    "semester": new_semester,
+                    "type": t,
+                    "specialization": new_specialization
+                })
+
+                if existing_subject:
+                    QMessageBox.warning(
+                        dialog, "Duplicate Entry",
+                        f"'{new_subject}' ({t}) is already assigned in {new_year} - {new_semester} ({new_specialization})."
+                    )
+                    continue
+
+                subject_doc = {
+                    "subject": new_subject,
+                    "year": new_year,
+                    "semester": new_semester,
+                    "type": t,
+                    "specialization": new_specialization
+                }
+
+                if t == "Theory":
+                    subject_doc["faculty"] = new_faculty
+                else:
+                    subject_doc["ta"] = new_ta
+
+                self.subject_collection.insert_one(subject_doc)
+                inserted_count += 1
+
+            if inserted_count:
+                QMessageBox.information(dialog, "Success", f"Subject '{new_subject}' updated successfully ({inserted_count} types)!")
+                self.loadSubjects()
+                dialog.accept()
+            else:
+                QMessageBox.information(dialog, "Info", "No new subject types were added.")
+                self.loadSubjects()
+
+        update_btn.clicked.connect(updateAction)
+        layout.addWidget(update_btn)
+
+        dialog.setLayout(layout)
+        dialog.exec()
 
     def updateSemesterDropdown(self, selected_year):
         semesters = self.year_semester_map.get(selected_year, [])
@@ -514,7 +741,7 @@ class TimetableManager(QWidget):
             QMessageBox.warning(self, "Error", "Please enter a subject name.")
             return
 
-        if not faculty:
+        if not faculty and "Theory" in types:
             QMessageBox.warning(self, "Error", "Faculty name is mandatory for Theory subjects.")
             return
 
@@ -571,9 +798,10 @@ class TimetableManager(QWidget):
             self.ta_input.clear()
             self.loadSubjects()
         else:
-            QMessageBox.information(self, "Info", f"No new subject types were added.")
+            QMessageBox.information(self, "Info", "No new subject types were added.")
 
     def loadSubjects(self):
+        self.subject_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.subject_table.setRowCount(0)
         subjects = list(self.subject_collection.find())
 
@@ -650,38 +878,33 @@ class TimetableManager(QWidget):
             return
 
         subject_name = self.subject_table.item(row, 0).text()
-        reply = QMessageBox.question(self, "Delete Subject", f"Are you sure you want to delete '{subject_name}'?",
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            self.subject_collection.delete_one({"subject": subject_name})
-            self.subject_table.removeRow(row)
-            QMessageBox.information(self, "Success", "Subject deleted successfully!")
+        year_text = self.subject_table.item(row, 2).text()
+        semester = self.subject_table.item(row, 3).text()
 
-    def updateSubject(self):
-        row = self.subject_table.currentRow()
-        if row == -1:
-            QMessageBox.warning(self, "Error", "Please select a subject to update.")
-            return
+        # Extract year and specialization from year_text
+        year = year_text
+        specialization = ""
+        if "(" in year_text:
+            year, specialization = year_text.split(" (")
+            specialization = specialization.rstrip(")")
+            year = year.strip()
 
-        subject_name = self.subject_table.item(row, 0).text()
-        new_year = self.year_dropdown.currentText()
-        new_semester = self.semester_dropdown.currentText()
-        new_faculty = self.faculty_dropdown.currentText()
-        new_type = "Theory" if self.theory_radio.isChecked() else "Lab"
-
-        self.subject_collection.update_one(
-            {"subject": subject_name},
-            {"$set": {
-                "year": new_year,
-                "semester": new_semester,
-                "faculty": new_faculty,
-                "type": new_type
-            }}
+        reply = QMessageBox.question(
+            self, "Delete Subject",
+            f"Are you sure you want to delete '{subject_name}' for {year} - {semester} ({specialization})?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
-        QMessageBox.information(self, "Success", f"Subject '{subject_name}' updated successfully!")
-        self.loadSubjects()
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Delete all types of this subject for the given year, semester, and specialization
+            self.subject_collection.delete_many({
+                "subject": subject_name,
+                "year": year,
+                "semester": semester,
+                "specialization": specialization
+            })
+            self.loadSubjects()
+            QMessageBox.information(self, "Success", "Subject deleted successfully!")
 
     def setupStrengthTab(self):
         layout = QVBoxLayout()
@@ -772,6 +995,7 @@ class TimetableManager(QWidget):
         self.loadStrengthData()
 
     def loadStrengthData(self):
+        self.strength_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.strength_table.setRowCount(0)
         for row, strength in enumerate(self.strength_collection.find()):
             self.strength_table.insertRow(row)
@@ -875,6 +1099,7 @@ class TimetableManager(QWidget):
         self.loadRooms()
 
     def loadRooms(self):
+        self.room_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.room_table.setRowCount(0)
 
         for row, room in enumerate(self.room_collection.find()):
@@ -980,6 +1205,7 @@ class TimetableManager(QWidget):
         self.loadLabs()
 
     def loadLabs(self):
+        self.lab_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.lab_table.setRowCount(0)
 
         for row, lab in enumerate(self.lab_collection.find()):

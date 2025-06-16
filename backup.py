@@ -243,16 +243,8 @@ class TimetableGenerator:
                             lab["subject"] not in assigned_labs and
                             not any(s and s.get("type") == "Lab" for s in weekly_schedule[day].values())):
                             
-                            weekly_schedule[day][time_slots[slot_index]] = {
-                                "subject": lab["subject"],
-                                "type": "Lab",
-                                "instructor": lab.get("ta", "N/A")  # Store TA for labs
-                            }
-                            weekly_schedule[day][time_slots[slot_index + 1]] = {
-                                "subject": lab["subject"],
-                                "type": "Lab",
-                                "instructor": lab.get("ta", "N/A")  # Store TA for labs
-                            }
+                            weekly_schedule[day][time_slots[slot_index]] = {"subject": lab["subject"], "type": "Lab"}
+                            weekly_schedule[day][time_slots[slot_index + 1]] = {"subject": lab["subject"], "type": "Lab"}
                             
                             global_faculty_schedule[day][time_slots[slot_index]] = f"{lab['subject']}_{spec}_{batch}"
                             global_faculty_schedule[day][time_slots[slot_index + 1]] = f"{lab['subject']}_{spec}_{batch}"
@@ -274,11 +266,7 @@ class TimetableGenerator:
                         day = random.choice(days)
                         slot = random.choice(time_slots)
                         if not weekly_schedule[day][slot] and not global_faculty_schedule[day][slot]:
-                            weekly_schedule[day][slot] = {
-                                "subject": tutorial["subject"],
-                                "type": "Tutorial",
-                                "instructor": tutorial.get("ta", "N/A")  # Store TA for tutorials
-                            }
+                            weekly_schedule[day][slot] = {"subject": tutorial["subject"], "type": "Tutorial"}
                             global_faculty_schedule[day][slot] = f"{tutorial['subject']}_{spec}_{batch}"
                             assigned = True
                         attempts += 1
@@ -305,11 +293,7 @@ class TimetableGenerator:
                             
                             if available_subjects and lecture_count < 3:
                                 subject = random.choice(available_subjects)
-                                weekly_schedule[day][slot] = {
-                                    "subject": subject["subject"],
-                                    "type": "Theory",
-                                    "instructor": subject.get("faculty", "N/A")  # Store faculty for theory
-                                }
+                                weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
                                 subject_counts[subject["subject"]] += 1
                                 lecture_count += 1
 
@@ -325,11 +309,7 @@ class TimetableGenerator:
                     if all(slot is None for slot in weekly_schedule[day].values()):
                         slot = random.choice(time_slots)
                         subject = random.choice(theory_subjects)
-                        weekly_schedule[day][slot] = {
-                            "subject": subject["subject"],
-                            "type": "Theory",
-                            "instructor": subject.get("faculty", "N/A")  # Store faculty for theory
-                        }
+                        weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
                         subject_counts[subject["subject"]] += 1
 
                 # Fill remaining slots with unassigned subjects, prioritizing after lunch
@@ -338,11 +318,7 @@ class TimetableGenerator:
                         if not weekly_schedule[day][slot]:
                             for sub in theory_subjects:
                                 if subject_counts[sub["subject"]] < 3:
-                                    weekly_schedule[day][slot] = {
-                                        "subject": sub["subject"],
-                                        "type": "Theory",
-                                        "instructor": sub.get("faculty", "N/A")  # Store faculty for theory
-                                    }
+                                    weekly_schedule[day][slot] = {"subject": sub["subject"], "type": "Theory"}
                                     subject_counts[sub["subject"]] += 1
                                     break
 
@@ -385,16 +361,8 @@ class TimetableGenerator:
                             lab["subject"] not in assigned_labs and
                             not any(s and s.get("type") == "Lab" for s in weekly_schedule[day].values())):
                             
-                            weekly_schedule[day][time_slots[slot_index]] = {
-                                "subject": lab["subject"],
-                                "type": "Lab",
-                                "instructor": lab.get("ta", "N/A")  # Store TA for labs
-                            }
-                            weekly_schedule[day][time_slots[slot_index + 1]] = {
-                                "subject": lab["subject"],
-                                "type": "Lab",
-                                "instructor": lab.get("ta", "N/A")  # Store TA for labs
-                            }
+                            weekly_schedule[day][time_slots[slot_index]] = {"subject": lab["subject"], "type": "Lab"}
+                            weekly_schedule[day][time_slots[slot_index + 1]] = {"subject": lab["subject"], "type": "Lab"}
                             
                             global_faculty_schedule[day][time_slots[slot_index]] = lab["subject"]
                             global_faculty_schedule[day][time_slots[slot_index + 1]] = lab["subject"]
@@ -416,11 +384,7 @@ class TimetableGenerator:
                         day = random.choice(days)
                         slot = random.choice(time_slots)
                         if not weekly_schedule[day][slot] and not global_faculty_schedule[day][slot]:
-                            weekly_schedule[day][slot] = {
-                                "subject": tutorial["subject"],
-                                "type": "Tutorial",
-                                "instructor": tutorial.get("ta", "N/A")  # Store TA for tutorials
-                            }
+                            weekly_schedule[day][slot] = {"subject": tutorial["subject"], "type": "Tutorial"}
                             global_faculty_schedule[day][slot] = tutorial["subject"]
                             assigned = True
                         attempts += 1
@@ -447,11 +411,7 @@ class TimetableGenerator:
                             
                             if available_subjects and lecture_count < 3:
                                 subject = random.choice(available_subjects)
-                                weekly_schedule[day][slot] = {
-                                    "subject": subject["subject"],
-                                    "type": "Theory",
-                                    "instructor": subject.get("faculty", "N/A")  # Store faculty for theory
-                                }
+                                weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
                                 subject_counts[subject["subject"]] += 1
                                 lecture_count += 1
 
@@ -467,11 +427,7 @@ class TimetableGenerator:
                     if all(slot is None for slot in weekly_schedule[day].values()):
                         slot = random.choice(time_slots)
                         subject = random.choice(theory_subjects)
-                        weekly_schedule[day][slot] = {
-                            "subject": subject["subject"],
-                            "type": "Theory",
-                            "instructor": subject.get("faculty", "N/A")  # Store faculty for theory
-                        }
+                        weekly_schedule[day][slot] = {"subject": subject["subject"], "type": "Theory"}
                         subject_counts[subject["subject"]] += 1
 
                 # Fill remaining slots with unassigned subjects, prioritizing after lunch
@@ -480,11 +436,7 @@ class TimetableGenerator:
                         if not weekly_schedule[day][slot]:
                             for sub in theory_subjects:
                                 if subject_counts[sub["subject"]] < 3:
-                                    weekly_schedule[day][slot] = {
-                                        "subject": sub["subject"],
-                                        "type": "Theory",
-                                        "instructor": sub.get("faculty", "N/A")  # Store faculty for theory
-                                    }
+                                    weekly_schedule[day][slot] = {"subject": sub["subject"], "type": "Theory"}
                                     subject_counts[sub["subject"]] += 1
                                     break
 
@@ -505,7 +457,6 @@ class TimetableGenerator:
         # Save the timetable with room and lab assignments to the database
         try:
             for timetable in timetables:
-                print(f"Saving timetable entry: {timetable}")
                 self.db["timetable"].update_one(
                     {"year": timetable["year"], "semester": timetable["semester"], "batch": timetable["batch"], "specialization": timetable["specialization"]},
                     {"$set": timetable},
@@ -531,10 +482,6 @@ class TimetableGenerator:
         rooms = list(self.db["rooms"].find())
         labs = list(self.db["labs"].find())
 
-        # Debug: Log available rooms and labs
-        print(f"Available rooms: {[room for room in rooms]}")
-        print(f"Available labs: {[lab for lab in labs]}")
-
         # Initialize occupancy tracking
         occupancy_collection = self.db["room_lab_occupancy"]
         occupancy = occupancy_collection.find_one() or {day: {slot: {"rooms": [], "labs": []} for slot in time_slots} for day in days}
@@ -542,7 +489,6 @@ class TimetableGenerator:
         for timetable in timetables:
             # Use the pre-calculated batch strength from the timetable
             batch_strength = timetable["batch_strength"]
-            print(f"Assigning rooms/labs for batch_strength: {batch_strength}")
 
             for day, slots in timetable["data"].items():
                 for slot_index, slot in enumerate(time_slots):
@@ -554,39 +500,32 @@ class TimetableGenerator:
                             next_session = slots.get(next_slot)
                             if next_session and next_session["type"] == "Lab":
                                 assigned_lab = None
-                                available_labs = [
-                                    lab for lab in labs
-                                    if lab.get("strength", 0) >= batch_strength  # Use "strength" for labs
-                                    and lab["lab_no"] not in occupancy[day][slot]["labs"]
-                                    and lab["lab_no"] not in occupancy[day][next_slot]["labs"]
-                                ]
-                                print(f"Available labs for {session['subject']} on {day} at {slot}: {available_labs}")
-                                if available_labs:
-                                    lab = random.choice(available_labs)
-                                    assigned_lab = lab["lab_no"]
-                                    occupancy[day][slot]["labs"].append(assigned_lab)
-                                    occupancy[day][next_slot]["labs"].append(assigned_lab)
+                                for lab in labs:
+                                    if (lab["strength"] >= batch_strength and
+                                        lab["lab_no"] not in occupancy[day][slot]["labs"] and
+                                        lab["lab_no"] not in occupancy[day][next_slot]["labs"]):
+                                        assigned_lab = lab["lab_no"]
+                                        occupancy[day][slot]["labs"].append(assigned_lab)
+                                        occupancy[day][next_slot]["labs"].append(assigned_lab)
+                                        break
+                                if assigned_lab:
                                     session["lab"] = assigned_lab
                                     next_session["lab"] = assigned_lab
                                 else:
-                                    print(f"Warning: No available lab for {session['subject']} on {day} at {slot} and {next_slot} with capacity >= {batch_strength}.")
+                                    print(f"Warning: No available lab for {session['subject']} on {day} at {slot} and {next_slot}.")
 
                     elif session and session["type"] in ["Theory", "Tutorial"]:
                         # Assign a classroom
                         assigned_room = None
-                        available_rooms = [
-                            room for room in rooms
-                            if room.get("capacity", 0) >= batch_strength
-                            and room["room_no"] not in occupancy[day][slot]["rooms"]
-                        ]
-                        print(f"Available rooms for {session['subject']} on {day} at {slot}: {available_rooms}")
-                        if available_rooms:
-                            room = random.choice(available_rooms)
-                            assigned_room = room["room_no"]
-                            occupancy[day][slot]["rooms"].append(assigned_room)
+                        for room in rooms:
+                            if room["capacity"] >= batch_strength and room["room_no"] not in occupancy[day][slot]["rooms"]:
+                                assigned_room = room["room_no"]
+                                occupancy[day][slot]["rooms"].append(assigned_room)
+                                break
+                        if assigned_room:
                             session["room"] = assigned_room
                         else:
-                            print(f"Warning: No available room for {session['subject']} on {day} at {slot} with capacity >= {batch_strength}.")
+                            print(f"Warning: No available room for {session['subject']} on {day} at {slot}.")
 
         # Update the occupancy collection
         occupancy_collection.update_one(
@@ -594,6 +533,8 @@ class TimetableGenerator:
             {"$set": occupancy},
             upsert=True
         )
+
+
 
 
 

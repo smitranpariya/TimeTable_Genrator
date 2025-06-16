@@ -219,16 +219,24 @@ class Timetable(QWidget):
                     if session:
                         subject = session.get("subject", "N/A")
                         subject_type = session.get("type", "N/A")
+                        instructor = session.get("instructor", "N/A")  # Fetch instructor name
                         if subject_type == "Lab":
                             location = session.get("lab", "N/A")
                             location_text = f"Lab: {location}"
+                            instructor_text = f"TA: {instructor}"
                         elif subject_type == "Office":
                             location_text = "Office Hour"
-                        else:
+                            instructor_text = ""
+                        elif subject_type == "Tutorial":
                             location = session.get("room", "N/A")
                             location_text = f"Room: {location}"
+                            instructor_text = f"TA: {instructor}"
+                        else:  # Theory
+                            location = session.get("room", "N/A")
+                            location_text = f"Room: {location}"
+                            instructor_text = f"Faculty: {instructor}"
                         
-                        text = f"{subject} ({subject_type})\n{location_text}"
+                        text = f"{subject} ({subject_type})\n{instructor_text}\n{location_text}"
                     else:
                         text = "Office Hour"
 
