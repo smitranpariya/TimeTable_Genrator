@@ -1,10 +1,11 @@
+import os 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QMainWindow,
     QLineEdit, QTableWidget, QTableWidgetItem, QTabWidget, 
     QMessageBox, QHeaderView, QHBoxLayout, QComboBox, QRadioButton, QMenuBar, QGridLayout, QFrame, QSizePolicy, QCheckBox,QAbstractItemView,QMenu,QDialog
 )
-from PyQt6.QtGui import QFont, QColor, QPalette, QIntValidator, QAction
-from PyQt6.QtCore import Qt, QProcess, pyqtSignal
+from PyQt6.QtGui import QFont, QColor, QPalette, QIntValidator, QAction, QIcon
+from PyQt6.QtCore import Qt, QProcess, pyqtSignal, QSize
 from pymongo import MongoClient
 from timetable_logic import TimetableDialog
 from time_table_ui import Timetable
@@ -164,12 +165,16 @@ class TimetableManager(QWidget):
         """)
         sidebar.addWidget(title_label)
 
+
         # Sidebar items
         self.tab_buttons = []
         tab_names = ["Subject Management", "Room Management", "Lab Management", "Strength Management", "View Timetables"]
-        icons = ["📚", "🏫", "🧪", "👥", "🕒"]
-        for i, (name, icon) in enumerate(zip(tab_names, icons)):
-            btn = QPushButton(f"{icon}  {name}")
+        icon_files = ["1.png", "2.png", "3.png", "4.png", "5.png"]
+        for i, (name, icon_file) in enumerate(zip(tab_names, icon_files)):
+            btn = QPushButton(name)
+            icon_path = os.path.join("icons", icon_file)  # Adjust if images are in a different folder
+            btn.setIcon(QIcon(icon_path))
+            btn.setIconSize(QSize(22, 22))
             btn.setStyleSheet("""
                 QPushButton {
                     background-color: transparent;
@@ -266,6 +271,7 @@ class TimetableManager(QWidget):
                 font-size: 14px;
             }
             QPushButton {
+                margin: 10px;
                 background-color: #FF6F61;
                 color: white;
                 padding: 10px;
@@ -352,8 +358,8 @@ class TimetableManager(QWidget):
             if i == index:
                 btn.setStyleSheet("""
                     QPushButton {
-                        background-color: #2A2A4E;
-                        color: white;
+                        background-color: white;
+                        color: #2A2A4E;
                         text-align: left;
                         padding: 12px 20px;
                         font-size: 14px;
@@ -368,8 +374,8 @@ class TimetableManager(QWidget):
             else:
                 btn.setStyleSheet("""
                     QPushButton {
-                        background-color: transparent;
-                        color: white;
+                        background-color: #B0B0B0;
+                        color: #1e1e1e;
                         text-align: left;
                         padding: 12px 20px;
                         font-size: 14px;
@@ -377,7 +383,8 @@ class TimetableManager(QWidget):
                         border: none;
                     }
                     QPushButton:hover {
-                        background-color: #2A2A4E;
+                        background-color: #FFFFFF;
+                        color: #2A2A4E;
                         border-radius: 8px;
                     }
                     QPushButton:focus {
@@ -964,11 +971,107 @@ class TimetableManager(QWidget):
         """)
         self.strength_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
+        # Enable context menu for right-click
+        self.strength_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.strength_table.customContextMenuRequested.connect(self.showStrengthContextMenu)
+
         layout.addLayout(input_layout)
         layout.addWidget(self.strength_table)
 
         self.strength_management_tab.setLayout(layout)
         self.loadStrengthData()
+
+    def showStrengthContextMenu(self, pos):
+        """Show context menu with Edit and Delete options for strength table"""
+        row = self.strength_table.currentRow()
+        if row == -1:
+            return
+
+        menu = QMenu(self)
+
+        edit_action = QAction("Edit", self)
+        edit_action.triggered.connect(self.editStrength)
+        menu.addAction(edit_action)
+
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(lambda: self.deleteStrength(row))
+        menu.addAction(delete_action)
+
+        menu.exec(self.strength_table.mapToGlobal(pos))
+
+    def editStrength(self):
+        """Open a dialog to edit the selected strength entry"""
+        row = self.strength_table.currentRow()
+        if row == -1:
+            QMessageBox.warning(self, "Error", "Please select a strength entry to edit.")
+            return
+
+        year = self.strength_table.item(row, 0).text()
+        sections = self.strength_table.item(row, 1).text()
+        students = self.strength_table.item(row, 2).text()
+        specialization = self.strength_table.item(row, 3).text()
+
+        # Create dialog for editing
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Strength")
+        dialog.setGeometry(300, 200, 400, 300)
+
+        layout = QVBoxLayout()
+
+        # Year
+        layout.addWidget(QLabel("Year:"))
+        year_input = QLineEdit(year)
+        layout.addWidget(year_input)
+
+        # Sections
+        layout.addWidget(QLabel("Number of Sections:"))
+        section_input = QLineEdit(sections)
+        layout.addWidget(section_input)
+
+        # Students
+        layout.addWidget(QLabel("Total Students:"))
+        student_input = QLineEdit(students)
+        layout.addWidget(student_input)
+
+        # Specialization
+        layout.addWidget(QLabel("Specialization:"))
+        spec_dropdown = QComboBox()
+        spec_dropdown.addItems(["None", "AI", "CS", "DS", "Cloud Computing"])
+        spec_dropdown.setCurrentText(specialization if specialization else "None")
+        layout.addWidget(spec_dropdown)
+
+        # Update Button
+        update_btn = QPushButton("Update")
+        def updateAction():
+            new_year = year_input.text().strip()
+            new_sections = section_input.text().strip()
+            new_students = student_input.text().strip()
+            new_specialization = spec_dropdown.currentText()
+
+            if not new_year or not new_sections or not new_students:
+                QMessageBox.warning(dialog, "Error", "Please fill Year, Sections, and Students fields!")
+                return
+
+            # Update the entry
+            self.strength_collection.update_one(
+                {"year": year, "specialization": specialization if specialization else None},
+                {"$set": {
+                    "year": new_year,
+                    "sections": new_sections,
+                    "students": new_students,
+                    "specialization": None if new_specialization == "None" else new_specialization
+                }}
+            )
+
+            QMessageBox.information(dialog, "Success", f"Strength updated for {new_year} year!")
+            self.loadStrengthData()
+            dialog.accept()
+
+        update_btn.clicked.connect(updateAction)
+        layout.addWidget(update_btn)
+
+        dialog.setLayout(layout)
+        dialog.exec()
 
     def addStrength(self):
         year = self.year_input.text().strip()
@@ -1018,13 +1121,25 @@ class TimetableManager(QWidget):
             self.strength_table.setItem(row, 3, spec_item)
 
     def deleteStrength(self, row):
-        year = self.strength_table.item(row, 0).text()
+        if row == -1:
+            QMessageBox.warning(self, "Error", "Please select a strength entry to delete.")
+            return
 
-        confirm = QMessageBox.question(self, "Delete", f"Delete record for {year} year?", 
-                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        year = self.strength_table.item(row, 0).text()
+        specialization = self.strength_table.item(row, 3).text()
+
+        confirm = QMessageBox.question(
+            self, "Delete",
+            f"Delete record for {year} year ({specialization if specialization else 'No specialization'})?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
         if confirm == QMessageBox.StandardButton.Yes:
-            self.strength_collection.delete_one({"year": year})
+            self.strength_collection.delete_one({
+                "year": year,
+                "specialization": specialization if specialization else None
+            })
             self.loadStrengthData()
+            QMessageBox.information(self, "Success", f"Strength record for {year} year deleted!")
 
     def setupRoomTab(self):
         layout = QVBoxLayout()
@@ -1075,12 +1190,91 @@ class TimetableManager(QWidget):
         """)
         self.room_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
+        # Enable context menu for right-click
+        self.room_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.room_table.customContextMenuRequested.connect(self.showRoomContextMenu)
+
         layout.addLayout(input_layout)
         layout.addWidget(self.room_table)
 
         self.room_tab.setLayout(layout)
 
         self.loadRooms()
+
+    def showRoomContextMenu(self, pos):
+        """Show context menu with Edit and Delete options for room table"""
+        row = self.room_table.currentRow()
+        if row == -1:
+            return
+
+        menu = QMenu(self)
+
+        edit_action = QAction("Edit", self)
+        edit_action.triggered.connect(self.editRoom)
+        menu.addAction(edit_action)
+
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(lambda: self.deleteRoom(row))
+        menu.addAction(delete_action)
+
+        menu.exec(self.room_table.mapToGlobal(pos))
+
+    def editRoom(self):
+        """Open a dialog to edit the selected room entry"""
+        row = self.room_table.currentRow()
+        if row == -1:
+            QMessageBox.warning(self, "Error", "Please select a room to edit.")
+            return
+
+        room_no = self.room_table.item(row, 0).text()
+        capacity = self.room_table.item(row, 1).text()
+
+        # Create dialog for editing
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Room")
+        dialog.setGeometry(300, 200, 400, 200)
+
+        layout = QVBoxLayout()
+
+        # Room Number
+        layout.addWidget(QLabel("Room Number:"))
+        room_no_input = QLineEdit(room_no)
+        layout.addWidget(room_no_input)
+
+        # Capacity
+        layout.addWidget(QLabel("Room Capacity:"))
+        capacity_input = QLineEdit(capacity)
+        capacity_input.setValidator(QIntValidator())
+        layout.addWidget(capacity_input)
+
+        # Update Button
+        update_btn = QPushButton("Update")
+        def updateAction():
+            new_room_no = room_no_input.text().strip()
+            new_capacity = capacity_input.text().strip()
+
+            if not new_room_no or not new_capacity:
+                QMessageBox.warning(dialog, "Error", "Please enter both Room Number and Capacity.")
+                return
+
+            # Update the entry
+            self.room_collection.update_one(
+                {"room_no": room_no},
+                {"$set": {
+                    "room_no": new_room_no,
+                    "capacity": int(new_capacity)
+                }}
+            )
+
+            QMessageBox.information(dialog, "Success", f"Room {new_room_no} updated successfully!")
+            self.loadRooms()
+            dialog.accept()
+
+        update_btn.clicked.connect(updateAction)
+        layout.addWidget(update_btn)
+
+        dialog.setLayout(layout)
+        dialog.exec()
 
     def addRoom(self):
         room_no = self.room_no.text().strip()
@@ -1115,14 +1309,20 @@ class TimetableManager(QWidget):
 
     def deleteRoom(self, row):
         try:
+            if row == -1:
+                QMessageBox.warning(self, "Error", "Please select a room to delete.")
+                return
+
             room_no = self.room_table.item(row, 0).text()
             if not room_no:
                 QMessageBox.warning(self, "Error", "No room selected.")
                 return
 
-            confirmation = QMessageBox.question(self, "Confirm Deletion",
-                                                f"Are you sure you want to delete Room {room_no}?",
-                                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            confirmation = QMessageBox.question(
+                self, "Confirm Deletion",
+                f"Are you sure you want to delete Room {room_no}?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
             if confirmation == QMessageBox.StandardButton.No:
                 return
 
@@ -1181,12 +1381,91 @@ class TimetableManager(QWidget):
         """)
         self.lab_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
+        # Enable context menu for right-click
+        self.lab_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.lab_table.customContextMenuRequested.connect(self.showLabContextMenu)
+
         layout.addLayout(input_layout)
         layout.addWidget(self.lab_table)
 
         self.lab_tab.setLayout(layout)
 
         self.loadLabs()
+
+    def showLabContextMenu(self, pos):
+        """Show context menu with Edit and Delete options for lab table"""
+        row = self.lab_table.currentRow()
+        if row == -1:
+            return
+
+        menu = QMenu(self)
+
+        edit_action = QAction("Edit", self)
+        edit_action.triggered.connect(self.editLab)
+        menu.addAction(edit_action)
+
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(lambda: self.deleteLab(row))
+        menu.addAction(delete_action)
+
+        menu.exec(self.lab_table.mapToGlobal(pos))
+
+    def editLab(self):
+        """Open a dialog to edit the selected lab entry"""
+        row = self.lab_table.currentRow()
+        if row == -1:
+            QMessageBox.warning(self, "Error", "Please select a lab to edit.")
+            return
+
+        lab_no = self.lab_table.item(row, 0).text()
+        strength = self.lab_table.item(row, 1).text()
+
+        # Create dialog for editing
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Lab")
+        dialog.setGeometry(300, 200, 400, 200)
+
+        layout = QVBoxLayout()
+
+        # Lab Number
+        layout.addWidget(QLabel("Lab Number:"))
+        lab_no_input = QLineEdit(lab_no)
+        layout.addWidget(lab_no_input)
+
+        # Lab Capacity
+        layout.addWidget(QLabel("Lab Capacity:"))
+        strength_input = QLineEdit(strength)
+        strength_input.setValidator(QIntValidator())
+        layout.addWidget(strength_input)
+
+        # Update Button
+        update_btn = QPushButton("Update")
+        def updateAction():
+            new_lab_no = lab_no_input.text().strip()
+            new_strength = strength_input.text().strip()
+
+            if not new_lab_no or not new_strength:
+                QMessageBox.warning(dialog, "Error", "Please enter both Lab Number and Capacity.")
+                return
+
+            # Update the entry
+            self.lab_collection.update_one(
+                {"lab_no": lab_no},
+                {"$set": {
+                    "lab_no": new_lab_no,
+                    "strength": int(new_strength)
+                }}
+            )
+
+            QMessageBox.information(dialog, "Success", f"Lab {new_lab_no} updated successfully!")
+            self.loadLabs()
+            dialog.accept()
+
+        update_btn.clicked.connect(updateAction)
+        layout.addWidget(update_btn)
+
+        dialog.setLayout(layout)
+        dialog.exec()
 
     def addLab(self):
         lab = self.lab_no.text().strip()
@@ -1232,16 +1511,18 @@ class TimetableManager(QWidget):
 
             lab_no = lab_item.text()
 
-            confirmation = QMessageBox.question(self, "Confirm Deletion",
-                                                f"Are you sure you want to delete Lab {lab_no}?",
-                                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            confirmation = QMessageBox.question(
+                self, "Confirm Deletion",
+                f"Are you sure you want to delete Lab {lab_no}?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
             if confirmation == QMessageBox.StandardButton.No:
                 return
 
             delete_result = self.lab_collection.delete_one({"lab_no": lab_no})
 
             if delete_result.deleted_count > 0:
-                self.lab_table.removeRow(row)
+                self.loadLabs()
                 QMessageBox.information(self, "Success", f"Lab {lab_no} deleted successfully!")
             else:
                 QMessageBox.warning(self, "Error", f"Lab {lab_no} not found in the database.")
