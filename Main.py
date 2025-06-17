@@ -28,8 +28,9 @@ class ClickableFrame(QFrame):
                 color: #333333;
                 font-size: 14px;
                 font-weight: 500;
-                padding: 15px;
+                padding: 20px;
                 border: none;
+                min-width: 400px;
             }
             QFrame:hover {
                 background-color: #FFE69C;
@@ -39,6 +40,9 @@ class ClickableFrame(QFrame):
             QFrame:focus {
                 outline: none;
             }
+            QLabel {
+                padding: 5px;
+            }
         """)
 
         if self.specialization != "None":
@@ -46,9 +50,11 @@ class ClickableFrame(QFrame):
         else:
             label = QLabel(f"Year {year} - Semester {semester} - Batch {batch}")
 
+        label.setWordWrap(True)
+
         layout = QVBoxLayout()
         layout.addWidget(label)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(10, 10, 10, 10)
         self.setLayout(layout)
 
     def mousePressEvent(self, event):
@@ -57,13 +63,15 @@ class ClickableFrame(QFrame):
         super().mousePressEvent(event)
 
 class ViewTimetableTab(QWidget):
-    timetable_selected = pyqtSignal(int, int, int, str)  # Signal for (year, semester, batch, specialization)
+    timetable_selected = pyqtSignal(int, int, int, str)
 
     def __init__(self):
         super().__init__()
         self.time_layout = QVBoxLayout()
         self.setLayout(self.time_layout)
         self.db = self.connectDB()
+        # List to store tuples of (layout, year, semester, batch, specialization)
+        self.timetable_layouts = []
         self.createTimetableBoxes()
 
     def connectDB(self):
@@ -75,49 +83,120 @@ class ViewTimetableTab(QWidget):
         vbox.setSpacing(10)
         vbox.setContentsMargins(10, 10, 10, 10)
 
-        timetables = self.db["timetable"].find()
+        # Fetch timetables from the database
+        timetables = list(self.db["timetable"].find())
+        print(f"Fetched timetables: {timetables}")  # Debug output
 
         for entry in timetables:
             year = entry["year"]
             semester = entry["semester"]
             batch = entry["batch"]
-            # Fetch specialization, default to "None" if not present
             specialization = entry.get("specialization", "None")
 
-            box = ClickableFrame(year, semester, batch, specialization)
+            # Create a horizontal layout for each timetable entry
+            entry_layout = QHBoxLayout()
 
-            # Ensure full width
+            # Add the timetable frame
+            box = ClickableFrame(year, semester, batch, specialization)
             box.setMinimumHeight(50)
             box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-            # Connect the clicked signal (which now emits year, semester, batch, specialization)
             box.clicked.connect(self.openTimetable)
+            entry_layout.addWidget(box)
 
-            # Add to layout
-            vbox.addWidget(box)
+            # Add the delete button
+            delete_btn = QPushButton("Delete")
+            delete_btn.clicked.connect(lambda _, y=year, s=semester, b=batch, spec=specialization: self.deleteTimetable(y, s, b, spec))
+            entry_layout.addWidget(delete_btn)
 
-        vbox.addStretch(1)  # Pushes items to the top
+            # Add the entry layout to the main vbox
+            vbox.addLayout(entry_layout)
+
+            # Store the layout with its identifying details
+            self.timetable_layouts.append((entry_layout, year, semester, batch, specialization))
+
+        vbox.addStretch(1)
         self.time_layout.addLayout(vbox)
 
     def openTimetable(self, year, semester, batch, specialization):
-        # Emit the signal with all parameters including specialization
         self.timetable_selected.emit(year, semester, batch, specialization)
-        # Pass specialization to the Timetable constructor
         self.timetable_ui = Timetable(batch, year, semester, specialization)
         self.timetable_ui.show()
 
+    def deleteTimetable(self, year, semester, batch, specialization):
+        try:
+            confirm = QMessageBox.question(
+                self, "Confirm Deletion",
+                f"Are you sure you want to delete the timetable for Year {year}, Semester {semester}, Batch {batch}, Specialization {specialization}?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if confirm == QMessageBox.StandardButton.No:
+                return
+
+            # Ensure all parameters are of the correct type
+            year_num = int(year) if isinstance(year, str) else year
+            semester_num = int(semester) if isinstance(semester, str) else semester
+            batch_num = int(batch) if isinstance(batch, str) else batch
+            specialization_str = str(specialization)
+
+            # Delete from database
+            success = TimetableGenerator.delete_timetable(self.db, year_num, semester_num, batch_num, specialization_str)
+            if success:
+                QMessageBox.information(self, "Success", "Timetable deleted successfully!")
+                # Remove the specific timetable box from the UI
+                self.removeTimetableBox(year_num, semester_num, batch_num, specialization_str)
+            else:
+                QMessageBox.warning(self, "Error", "Failed to delete timetable.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
+
+    def removeTimetableBox(self, year, semester, batch, specialization):
+        """Remove the specific timetable box from the UI."""
+        for i, (layout, y, s, b, spec) in enumerate(self.timetable_layouts):
+            if y == year and s == semester and b == batch and spec == specialization:
+                # Disconnect signals to prevent lingering connections
+                while layout.count():
+                    item = layout.takeAt(0)
+                    widget = item.widget()
+                    if widget:
+                        try:
+                            if isinstance(widget, ClickableFrame):
+                                widget.clicked.disconnect()
+                            if isinstance(widget, QPushButton):
+                                widget.clicked.disconnect()
+                        except:
+                            pass  # Ignore if already disconnected
+                        widget.deleteLater()
+
+                # Remove the layout from the parent layout (time_layout's vbox)
+                self.time_layout.removeItem(layout)
+                layout.deleteLater()
+
+                # Remove from the list
+                self.timetable_layouts.pop(i)
+                print(f"Removed timetable box for Year {year}, Semester {semester}, Batch {batch}, Specialization {specialization}")
+                break
+
     def refreshTimetable(self):
-        """Refresh the timetable display."""
-        # Clear the current layout
+        """Fallback method to fully refresh the timetable display if needed."""
+        # Clear the list
+        self.timetable_layouts.clear()
+
+        # Clear all existing layouts
         while self.time_layout.count():
             item = self.time_layout.takeAt(0)
             layout = item.layout()
             if layout is not None:
-                # Clear all widgets inside the nested layout
                 while layout.count():
                     sub_item = layout.takeAt(0)
                     widget = sub_item.widget()
                     if widget is not None:
+                        try:
+                            if isinstance(widget, ClickableFrame):
+                                widget.clicked.disconnect()
+                            if isinstance(widget, QPushButton):
+                                widget.clicked.disconnect()
+                        except:
+                            pass
                         widget.deleteLater()
                 layout.deleteLater()
             else:
@@ -1052,18 +1131,25 @@ class TimetableManager(QWidget):
                 QMessageBox.warning(dialog, "Error", "Please fill Year, Sections, and Students fields!")
                 return
 
+            # Normalize specialization value for query
+            spec_query_value = specialization if specialization and specialization != "None" else None
+
             # Update the entry
-            self.strength_collection.update_one(
-                {"year": year, "specialization": specialization if specialization else None},
+            result = self.strength_collection.update_one(
+                {"year": year, "specialization": spec_query_value},
                 {"$set": {
-                    "year": new_year,
-                    "sections": new_sections,
-                    "students": new_students,
-                    "specialization": None if new_specialization == "None" else new_specialization
+                    "year": str(new_year),
+                    "sections": str(new_sections),
+                    "students": str(new_students),
+                    "specialization": None if new_specialization == "None" else str(new_specialization)
                 }}
             )
 
-            QMessageBox.information(dialog, "Success", f"Strength updated for {new_year} year!")
+            if result.modified_count > 0:
+                QMessageBox.information(dialog, "Success", f"Strength updated for {new_year} year!")
+            else:
+                QMessageBox.warning(dialog, "Info", "No matching document found to update.")
+
             self.loadStrengthData()
             dialog.accept()
 
@@ -1072,6 +1158,7 @@ class TimetableManager(QWidget):
 
         dialog.setLayout(layout)
         dialog.exec()
+        
 
     def addStrength(self):
         year = self.year_input.text().strip()

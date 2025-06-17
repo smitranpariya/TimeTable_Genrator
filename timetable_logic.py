@@ -181,8 +181,87 @@ class TimetableGenerator:
 
         return True
 
+    def delete_timetable(db, year, semester, batch, specialization):
+        """Delete a timetable and update room, lab, and faculty/TA occupancy."""
+        try:
+            # Step 1: Fetch all timetables to debug the structure
+            all_timetables = list(db["timetable"].find())
+            print("All timetables in database:", all_timetables)
+
+            # Step 2: Construct the query with correct types
+            timetable_query = {
+                "year": year,  # Integer, e.g., 3
+                "semester": semester,  # Integer, e.g., 5
+                "batch": batch,  # Integer, e.g., 1
+                "specialization": specialization if specialization != "None" else "None"  # String, e.g., "AI"
+            }
+            print(f"Fetching timetable with query: {timetable_query}")
+            timetable_data = db["timetable"].find_one(timetable_query)
+
+            if not timetable_data:
+                print(f"No timetable found for {timetable_query}")
+                return False
+
+            # Step 3: Update room and lab occupancy
+            room_lab_occupancy_collection = db["room_lab_occupancy"]
+            room_lab_occupancy = room_lab_occupancy_collection.find_one() or {
+                day: {slot: {"rooms": [], "labs": []} for slot in [
+                    "9:30 - 10:30", "10:30 - 11:30", "11:30 - 12:30",
+                    "1:30 - 2:30", "2:30 - 3:30", "3:30 - 4:30", "4:30 - 5:30"
+                ]} for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+            }
+
+            for day, slots in timetable_data.get("data", {}).items():
+                for slot, session in slots.items():
+                    if session and session["type"] in ["Theory", "Tutorial"]:
+                        room = session.get("room")
+                        if room and day in room_lab_occupancy and slot in room_lab_occupancy[day]:
+                            if room in room_lab_occupancy[day][slot]["rooms"]:
+                                room_lab_occupancy[day][slot]["rooms"].remove(room)
+                    elif session and session["type"] == "Lab":
+                        lab = session.get("lab")
+                        if lab and day in room_lab_occupancy and slot in room_lab_occupancy[day]:
+                            if lab in room_lab_occupancy[day][slot]["labs"]:
+                                room_lab_occupancy[day][slot]["labs"].remove(lab)
+
+            room_lab_occupancy_collection.update_one(
+                {}, {"$set": room_lab_occupancy}, upsert=True
+            )
+            print(f"Updated room_lab_occupancy for deleted timetable: {timetable_query}")
+
+            # Step 4: Update faculty and TA occupancy
+            faculty_ta_occupancy_collection = db["faculty_ta_occupancy"]
+            faculty_ta_occupancy = faculty_ta_occupancy_collection.find_one() or {
+                day: {slot: [] for slot in [
+                    "9:30 - 10:30", "10:30 - 11:30", "11:30 - 12:30",
+                    "1:30 - 2:30", "2:30 - 3:30", "3:30 - 4:30", "4:30 - 5:30"
+                ]} for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+            }
+
+            for day, slots in timetable_data.get("data", {}).items():
+                for slot, session in slots.items():
+                    if session and "instructor" in session:
+                        instructor = session["instructor"]
+                        if day in faculty_ta_occupancy and slot in faculty_ta_occupancy[day]:
+                            if instructor in faculty_ta_occupancy[day][slot]:
+                                faculty_ta_occupancy[day][slot].remove(instructor)
+
+            faculty_ta_occupancy_collection.update_one(
+                {}, {"$set": faculty_ta_occupancy}, upsert=True
+            )
+            print(f"Updated faculty_ta_occupancy for deleted timetable: {timetable_query}")
+
+            # Step 5: Delete the timetable entry
+            db["timetable"].delete_one(timetable_query)
+            print(f"Timetable deleted for {timetable_query}")
+            return True
+
+        except Exception as e:
+            print(f"Error deleting timetable: {e}")
+            return False
+
     def generate_timetable(self):
-        """Generate and save the timetable ensuring no faculty conflicts between batches."""
+        """Generate and save the timetable ensuring no faculty/TA conflicts across batches, years, or specializations."""
         if not self.fetch_data():
             print("Failed to generate timetable due to missing data.")
             return None
@@ -192,7 +271,7 @@ class TimetableGenerator:
         if self.year in [3, 4] and self.specialization and self.specialization != "None":
             strength_query["specialization"] = self.specialization
         else:
-            strength_query["specialization"] = None  # For 1st and 2nd years, specialization is null
+            strength_query["specialization"] = None
 
         print(f"Fetching strength details with query: {strength_query}")
         strength_info = self.db["strength_details"].find_one(strength_query)
@@ -214,10 +293,51 @@ class TimetableGenerator:
 
         days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
-        global_faculty_schedule = {day: {slot: None for slot in time_slots} for day in days}
+        # Identify faculty and TAs teaching multiple subjects or across specializations/years
+        all_subjects = list(self.db["Subject_collection"].find())
+        faculty_ta_counts = {}
+
+        for subject in all_subjects:
+            year = subject["year"]
+            specialization = subject.get("specialization", "None")
+            subject_name = subject["subject"]
+            subject_type = subject["type"]
+            instructor = subject.get("faculty", subject.get("ta", "N/A"))
+
+            if instructor == "N/A":
+                continue
+
+            key = (instructor, subject_type)
+            if key not in faculty_ta_counts:
+                faculty_ta_counts[key] = []
+            faculty_ta_counts[key].append({
+                "subject": subject_name,
+                "year": year,
+                "specialization": specialization
+            })
+
+        faculty_ta_to_track = {}
+        for (instructor, subject_type), assignments in faculty_ta_counts.items():
+            subjects = set(assignment["subject"] for assignment in assignments)
+            year_spec_pairs = set((assignment["year"], assignment["specialization"]) for assignment in assignments)
+
+            if len(subjects) > 1 or len(year_spec_pairs) > 1:
+                faculty_ta_to_track[instructor] = subject_type
+
+        print(f"Faculty/TA to track for conflicts: {faculty_ta_to_track}")
+
+        # Initialize or update the faculty_ta_occupancy collection
+        faculty_ta_occupancy_collection = self.db["faculty_ta_occupancy"]
+        faculty_ta_occupancy = {day: {slot: set() for slot in time_slots} for day in days}
+
+        existing_occupancy = faculty_ta_occupancy_collection.find_one()
+        if existing_occupancy:
+            for day in days:
+                for slot in time_slots:
+                    faculty_ta_occupancy[day][slot] = set(existing_occupancy.get(day, {}).get(slot, []))
+
         timetables = []
 
-        # If year is 3rd or 4th, use the specialization
         if self.year in [3, 4] and self.specialization and self.specialization != "None":
             spec = self.specialization
 
@@ -227,35 +347,41 @@ class TimetableGenerator:
                 lab_subjects = [sub for sub in self.subjects if sub["type"] == "Lab"]
                 assigned_labs = set()
 
-                # Ensure all labs are assigned
                 for lab in lab_subjects:
                     assigned = False
                     attempts = 0
+                    ta = lab.get("ta", "N/A")
                     while not assigned and attempts < 100:
                         day = random.choice(days)
                         slot_index = random.randint(0, len(time_slots) - 2)
 
+                        ta_conflict = (
+                            ta in faculty_ta_to_track and
+                            (ta in faculty_ta_occupancy[day][time_slots[slot_index]] or
+                            ta in faculty_ta_occupancy[day][time_slots[slot_index + 1]])
+                        )
+
                         if (slot_index != 2 and
                             not weekly_schedule[day][time_slots[slot_index]] and 
                             not weekly_schedule[day][time_slots[slot_index + 1]] and
-                            not global_faculty_schedule[day][time_slots[slot_index]] and
-                            not global_faculty_schedule[day][time_slots[slot_index + 1]] and
+                            not ta_conflict and
                             lab["subject"] not in assigned_labs and
                             not any(s and s.get("type") == "Lab" for s in weekly_schedule[day].values())):
                             
                             weekly_schedule[day][time_slots[slot_index]] = {
                                 "subject": lab["subject"],
                                 "type": "Lab",
-                                "instructor": lab.get("ta", "N/A")  # Store TA for labs
+                                "instructor": ta
                             }
                             weekly_schedule[day][time_slots[slot_index + 1]] = {
                                 "subject": lab["subject"],
                                 "type": "Lab",
-                                "instructor": lab.get("ta", "N/A")  # Store TA for labs
+                                "instructor": ta
                             }
                             
-                            global_faculty_schedule[day][time_slots[slot_index]] = f"{lab['subject']}_{spec}_{batch}"
-                            global_faculty_schedule[day][time_slots[slot_index + 1]] = f"{lab['subject']}_{spec}_{batch}"
+                            if ta in faculty_ta_to_track:
+                                faculty_ta_occupancy[day][time_slots[slot_index]].add(ta)
+                                faculty_ta_occupancy[day][time_slots[slot_index + 1]].add(ta)
                             
                             assigned_labs.add(lab["subject"])
                             assigned = True
@@ -266,20 +392,27 @@ class TimetableGenerator:
 
                 tutorial_subjects = [sub for sub in self.subjects if sub["type"] == "Tutorial"]
 
-                # Ensure all tutorials are assigned
                 for tutorial in tutorial_subjects:
                     assigned = False
                     attempts = 0
+                    ta = tutorial.get("ta", "N/A")
                     while not assigned and attempts < 100:
                         day = random.choice(days)
                         slot = random.choice(time_slots)
-                        if not weekly_schedule[day][slot] and not global_faculty_schedule[day][slot]:
+
+                        ta_conflict = (
+                            ta in faculty_ta_to_track and
+                            ta in faculty_ta_occupancy[day][slot]
+                        )
+
+                        if not weekly_schedule[day][slot] and not ta_conflict:
                             weekly_schedule[day][slot] = {
                                 "subject": tutorial["subject"],
                                 "type": "Tutorial",
-                                "instructor": tutorial.get("ta", "N/A")  # Store TA for tutorials
+                                "instructor": ta
                             }
-                            global_faculty_schedule[day][slot] = f"{tutorial['subject']}_{spec}_{batch}"
+                            if ta in faculty_ta_to_track:
+                                faculty_ta_occupancy[day][slot].add(ta)
                             assigned = True
                         attempts += 1
 
@@ -296,55 +429,74 @@ class TimetableGenerator:
                             available_subjects = [
                                 sub for sub in theory_subjects 
                                 if subject_counts[sub["subject"]] < 3 and 
-                                global_faculty_schedule[day][slot] != f"{sub['subject']}_{spec}_{batch}" and
                                 sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s] and
-                                (slot_index == 0 or global_faculty_schedule[day][time_slots[slot_index - 1]] != f"{sub['subject']}_{spec}_{batch}") and
-                                (slot_index == len(time_slots) - 1 or global_faculty_schedule[day][time_slots[slot_index + 1]] != f"{sub['subject']}_{spec}_{batch}") and
                                 sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s and s["type"] == "Theory"]
+                            ]
+
+                            available_subjects = [
+                                sub for sub in available_subjects
+                                if not (sub.get("faculty", "N/A") in faculty_ta_to_track and (
+                                    sub.get("faculty", "N/A") in faculty_ta_occupancy[day][slot] or
+                                    (slot_index > 0 and sub.get("faculty", "N/A") in faculty_ta_occupancy[day][time_slots[slot_index - 1]]) or
+                                    (slot_index < len(time_slots) - 1 and sub.get("faculty", "N/A") in faculty_ta_occupancy[day][time_slots[slot_index + 1]])
+                                ))
                             ]
                             
                             if available_subjects and lecture_count < 3:
                                 subject = random.choice(available_subjects)
+                                faculty = subject.get("faculty", "N/A")
                                 weekly_schedule[day][slot] = {
                                     "subject": subject["subject"],
                                     "type": "Theory",
-                                    "instructor": subject.get("faculty", "N/A")  # Store faculty for theory
+                                    "instructor": faculty
                                 }
                                 subject_counts[subject["subject"]] += 1
                                 lecture_count += 1
 
-                                global_faculty_schedule[day][slot] = f"{subject['subject']}_{spec}_{batch}"
+                                if faculty in faculty_ta_to_track:
+                                    faculty_ta_occupancy[day][slot].add(faculty)
                             elif lecture_count >= 3:
                                 weekly_schedule[day][slot] = {"subject": "Office Hour", "type": "Office"}
 
                     if lecture_count < 3:
                         print(f"Warning: Less than 3 lectures assigned on {day} for batch {batch}, specialization {spec}.")
 
-                # Ensure at least one lecture per day
                 for day in days:
                     if all(slot is None for slot in weekly_schedule[day].values()):
                         slot = random.choice(time_slots)
-                        subject = random.choice(theory_subjects)
-                        weekly_schedule[day][slot] = {
-                            "subject": subject["subject"],
-                            "type": "Theory",
-                            "instructor": subject.get("faculty", "N/A")  # Store faculty for theory
-                        }
-                        subject_counts[subject["subject"]] += 1
+                        available_subjects = [
+                            sub for sub in theory_subjects if subject_counts[sub["subject"]] < 3
+                            if not (sub.get("faculty", "N/A") in faculty_ta_to_track and
+                                    sub.get("faculty", "N/A") in faculty_ta_occupancy[day][slot])
+                        ]
+                        if available_subjects:
+                            subject = random.choice(available_subjects)
+                            faculty = subject.get("faculty", "N/A")
+                            weekly_schedule[day][slot] = {
+                                "subject": subject["subject"],
+                                "type": "Theory",
+                                "instructor": faculty
+                            }
+                            subject_counts[subject["subject"]] += 1
+                            if faculty in faculty_ta_to_track:
+                                faculty_ta_occupancy[day][slot].add(faculty)
 
-                # Fill remaining slots with unassigned subjects, prioritizing after lunch
                 for day in days:
                     for slot in time_slots[3:]:
                         if not weekly_schedule[day][slot]:
                             for sub in theory_subjects:
                                 if subject_counts[sub["subject"]] < 3:
-                                    weekly_schedule[day][slot] = {
-                                        "subject": sub["subject"],
-                                        "type": "Theory",
-                                        "instructor": sub.get("faculty", "N/A")  # Store faculty for theory
-                                    }
-                                    subject_counts[sub["subject"]] += 1
-                                    break
+                                    faculty = sub.get("faculty", "N/A")
+                                    if not (faculty in faculty_ta_to_track and faculty in faculty_ta_occupancy[day][slot]):
+                                        weekly_schedule[day][slot] = {
+                                            "subject": sub["subject"],
+                                            "type": "Theory",
+                                            "instructor": faculty
+                                        }
+                                        subject_counts[sub["subject"]] += 1
+                                        if faculty in faculty_ta_to_track:
+                                            faculty_ta_occupancy[day][slot].add(faculty)
+                                        break
 
                 batch_timetable = {
                     "year": self.year,
@@ -358,46 +510,47 @@ class TimetableGenerator:
                 timetables.append(batch_timetable)
 
         else:
-            # For 1st and 2nd years, proceed as before
-            num_batches = int(strength_info["sections"])
-            total_students = int(strength_info["students"])
-            batch_strength = round(total_students / num_batches)
-
             for batch in range(1, num_batches + 1):
                 weekly_schedule = {day: {slot: None for slot in time_slots} for day in days}
 
                 lab_subjects = [sub for sub in self.subjects if sub["type"] == "Lab"]
                 assigned_labs = set()
 
-                # Ensure all labs are assigned
                 for lab in lab_subjects:
                     assigned = False
                     attempts = 0
+                    ta = lab.get("ta", "N/A")
                     while not assigned and attempts < 100:
                         day = random.choice(days)
                         slot_index = random.randint(0, len(time_slots) - 2)
 
+                        ta_conflict = (
+                            ta in faculty_ta_to_track and
+                            (ta in faculty_ta_occupancy[day][time_slots[slot_index]] or
+                            ta in faculty_ta_occupancy[day][time_slots[slot_index + 1]])
+                        )
+
                         if (slot_index != 2 and
                             not weekly_schedule[day][time_slots[slot_index]] and 
                             not weekly_schedule[day][time_slots[slot_index + 1]] and
-                            not global_faculty_schedule[day][time_slots[slot_index]] and
-                            not global_faculty_schedule[day][time_slots[slot_index + 1]] and
+                            not ta_conflict and
                             lab["subject"] not in assigned_labs and
                             not any(s and s.get("type") == "Lab" for s in weekly_schedule[day].values())):
                             
                             weekly_schedule[day][time_slots[slot_index]] = {
                                 "subject": lab["subject"],
                                 "type": "Lab",
-                                "instructor": lab.get("ta", "N/A")  # Store TA for labs
+                                "instructor": ta
                             }
                             weekly_schedule[day][time_slots[slot_index + 1]] = {
                                 "subject": lab["subject"],
                                 "type": "Lab",
-                                "instructor": lab.get("ta", "N/A")  # Store TA for labs
+                                "instructor": ta
                             }
                             
-                            global_faculty_schedule[day][time_slots[slot_index]] = lab["subject"]
-                            global_faculty_schedule[day][time_slots[slot_index + 1]] = lab["subject"]
+                            if ta in faculty_ta_to_track:
+                                faculty_ta_occupancy[day][time_slots[slot_index]].add(ta)
+                                faculty_ta_occupancy[day][time_slots[slot_index + 1]].add(ta)
                             
                             assigned_labs.add(lab["subject"])
                             assigned = True
@@ -408,20 +561,27 @@ class TimetableGenerator:
 
                 tutorial_subjects = [sub for sub in self.subjects if sub["type"] == "Tutorial"]
 
-                # Ensure all tutorials are assigned
                 for tutorial in tutorial_subjects:
                     assigned = False
                     attempts = 0
+                    ta = tutorial.get("ta", "N/A")
                     while not assigned and attempts < 100:
                         day = random.choice(days)
                         slot = random.choice(time_slots)
-                        if not weekly_schedule[day][slot] and not global_faculty_schedule[day][slot]:
+
+                        ta_conflict = (
+                            ta in faculty_ta_to_track and
+                            ta in faculty_ta_occupancy[day][slot]
+                        )
+
+                        if not weekly_schedule[day][slot] and not ta_conflict:
                             weekly_schedule[day][slot] = {
                                 "subject": tutorial["subject"],
                                 "type": "Tutorial",
-                                "instructor": tutorial.get("ta", "N/A")  # Store TA for tutorials
+                                "instructor": ta
                             }
-                            global_faculty_schedule[day][slot] = tutorial["subject"]
+                            if ta in faculty_ta_to_track:
+                                faculty_ta_occupancy[day][slot].add(ta)
                             assigned = True
                         attempts += 1
 
@@ -438,55 +598,74 @@ class TimetableGenerator:
                             available_subjects = [
                                 sub for sub in theory_subjects 
                                 if subject_counts[sub["subject"]] < 3 and 
-                                global_faculty_schedule[day][slot] != sub["subject"] and
                                 sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s] and
-                                (slot_index == 0 or global_faculty_schedule[day][time_slots[slot_index - 1]] != sub["subject"]) and
-                                (slot_index == len(time_slots) - 1 or global_faculty_schedule[day][time_slots[slot_index + 1]] != sub["subject"]) and
                                 sub["subject"] not in [s["subject"] for s in weekly_schedule[day].values() if s and s["type"] == "Theory"]
+                            ]
+
+                            available_subjects = [
+                                sub for sub in available_subjects
+                                if not (sub.get("faculty", "N/A") in faculty_ta_to_track and (
+                                    sub.get("faculty", "N/A") in faculty_ta_occupancy[day][slot] or
+                                    (slot_index > 0 and sub.get("faculty", "N/A") in faculty_ta_occupancy[day][time_slots[slot_index - 1]]) or
+                                    (slot_index < len(time_slots) - 1 and sub.get("faculty", "N/A") in faculty_ta_occupancy[day][time_slots[slot_index + 1]])
+                                ))
                             ]
                             
                             if available_subjects and lecture_count < 3:
                                 subject = random.choice(available_subjects)
+                                faculty = subject.get("faculty", "N/A")
                                 weekly_schedule[day][slot] = {
                                     "subject": subject["subject"],
                                     "type": "Theory",
-                                    "instructor": subject.get("faculty", "N/A")  # Store faculty for theory
+                                    "instructor": faculty
                                 }
                                 subject_counts[subject["subject"]] += 1
                                 lecture_count += 1
 
-                                global_faculty_schedule[day][slot] = subject["subject"]
+                                if faculty in faculty_ta_to_track:
+                                    faculty_ta_occupancy[day][slot].add(faculty)
                             elif lecture_count >= 3:
                                 weekly_schedule[day][slot] = {"subject": "Office Hour", "type": "Office"}
 
                     if lecture_count < 3:
                         print(f"Warning: Less than 3 lectures assigned on {day} for batch {batch}.")
 
-                # Ensure at least one lecture per day
                 for day in days:
                     if all(slot is None for slot in weekly_schedule[day].values()):
                         slot = random.choice(time_slots)
-                        subject = random.choice(theory_subjects)
-                        weekly_schedule[day][slot] = {
-                            "subject": subject["subject"],
-                            "type": "Theory",
-                            "instructor": subject.get("faculty", "N/A")  # Store faculty for theory
-                        }
-                        subject_counts[subject["subject"]] += 1
+                        available_subjects = [
+                            sub for sub in theory_subjects if subject_counts[sub["subject"]] < 3
+                            if not (sub.get("faculty", "N/A") in faculty_ta_to_track and
+                                    sub.get("faculty", "N/A") in faculty_ta_occupancy[day][slot])
+                        ]
+                        if available_subjects:
+                            subject = random.choice(available_subjects)
+                            faculty = subject.get("faculty", "N/A")
+                            weekly_schedule[day][slot] = {
+                                "subject": subject["subject"],
+                                "type": "Theory",
+                                "instructor": faculty
+                            }
+                            subject_counts[subject["subject"]] += 1
+                            if faculty in faculty_ta_to_track:
+                                faculty_ta_occupancy[day][slot].add(faculty)
 
-                # Fill remaining slots with unassigned subjects, prioritizing after lunch
                 for day in days:
                     for slot in time_slots[3:]:
                         if not weekly_schedule[day][slot]:
                             for sub in theory_subjects:
                                 if subject_counts[sub["subject"]] < 3:
-                                    weekly_schedule[day][slot] = {
-                                        "subject": sub["subject"],
-                                        "type": "Theory",
-                                        "instructor": sub.get("faculty", "N/A")  # Store faculty for theory
-                                    }
-                                    subject_counts[sub["subject"]] += 1
-                                    break
+                                    faculty = sub.get("faculty", "N/A")
+                                    if not (faculty in faculty_ta_to_track and faculty in faculty_ta_occupancy[day][slot]):
+                                        weekly_schedule[day][slot] = {
+                                            "subject": sub["subject"],
+                                            "type": "Theory",
+                                            "instructor": faculty
+                                        }
+                                        subject_counts[sub["subject"]] += 1
+                                        if faculty in faculty_ta_to_track:
+                                            faculty_ta_occupancy[day][slot].add(faculty)
+                                        break
 
                 batch_timetable = {
                     "year": self.year,
@@ -499,10 +678,8 @@ class TimetableGenerator:
                 }
                 timetables.append(batch_timetable)
 
-        # Assign rooms and labs to the generated timetable
         self.assign_rooms_and_labs(timetables)
 
-        # Save the timetable with room and lab assignments to the database
         try:
             for timetable in timetables:
                 print(f"Saving timetable entry: {timetable}")
@@ -512,10 +689,23 @@ class TimetableGenerator:
                     upsert=True
                 )
             print("Timetable generated and updated successfully for all batches!")
-            return timetables
         except Exception as e:
             print(f"Error saving timetable to database: {e}")
             return None
+
+        try:
+            faculty_ta_occupancy_for_db = {
+                day: {slot: list(instructors) for slot, instructors in day_slots.items()}
+                for day, day_slots in faculty_ta_occupancy.items()
+            }
+            faculty_ta_occupancy_collection.update_one(
+                {}, {"$set": faculty_ta_occupancy_for_db}, upsert=True
+            )
+            print("Faculty/TA occupancy updated successfully!")
+        except Exception as e:
+            print(f"Error saving faculty/TA occupancy: {e}")
+
+        return timetables
 
     def assign_rooms_and_labs(self, timetables):
         """Assign classrooms and labs to each lecture and lab in the timetable."""
